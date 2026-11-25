@@ -1,0 +1,37 @@
+# 技术方案确定后，按实际工具链补充和核对。锁文件与示例配置应提交。
+
+# 密码、密钥
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+
+# 真实用户数据
+/user-data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# 依赖缓存
+node_modules/
+.venv/
+__pycache__/
+
+# 构建结果
+/dist/
+/out/
+/target/
+bin/
+obj/
+
+# 临时文件
+/tmp/
+/.tmp/
+*.tmp
+*.log
