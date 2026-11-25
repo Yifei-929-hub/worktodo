@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
+import { applyPatch, reorderSlots } from '../shared/rules'
 import type { AppState, Priority, Todo, TodoPatch } from '../shared/types'
 import { dayKey, isValidDate, isValidTime, TRASH_MS } from '../shared/views'
 
@@ -91,22 +92,20 @@ export class TodoStore {
 
   update(id: string, patch: TodoPatch): void {
     const t = this.live(id)
-    const title = patch.title === undefined ? t.title : cleanTitle(patch.title)
-    const detail = patch.detail === undefined ? t.detail : cleanText(patch.detail)
-    const result = patch.result === undefined ? t.result : cleanText(patch.result)
-    const priority = patch.priority === undefined ? t.priority : cleanPriority(patch.priority)
-    let date = patch.date === undefined ? t.date : cleanDate(patch.date)
-    let time = patch.time === undefined ? t.time : cleanTime(patch.time)
-    if (time && !date) {
-      // 只填几点时日期取今天；主动清空日期时一并清空时间
-      if (patch.time) date = dayKey(this.now())
-      else time = null
-    }
+    // 只取允许修改的字段，并逐项校验
+    const clean: TodoPatch = {}
+    if (patch.title !== undefined) clean.title = cleanTitle(patch.title)
+    if (patch.detail !== undefined) clean.detail = cleanText(patch.detail)
+    if (patch.result !== undefined) clean.result = cleanText(patch.result)
+    if (patch.priority !== undefined) clean.priority = cleanPriority(patch.priority)
+    if (patch.date !== undefined) clean.date = cleanDate(patch.date)
+    if (patch.time !== undefined) clean.time = cleanTime(patch.time)
+    const n = applyPatch(t, clean, dayKey(this.now()))
     this.db
       .prepare(
         'UPDATE todos SET title = ?, date = ?, time = ?, detail = ?, result = ?, priority = ? WHERE id = ?'
       )
-      .run(title, date, time, detail, result, priority, id)
+      .run(n.title, n.date, n.time, n.detail, n.result, n.priority, id)
   }
 
   setDone(id: string, done: boolean): void {
@@ -118,10 +117,10 @@ export class TodoStore {
   /** 在给定待办之间重新分配它们原有的排序值，不影响其他待办。 */
   reorder(ids: string[]): void {
     if (!Array.isArray(ids) || new Set(ids).size !== ids.length) throw new Error('排序数据无效')
-    const slots = ids.map((id) => this.live(id).sort).sort((a, b) => a - b)
+    const slots = reorderSlots(ids.map((id) => this.live(id)), ids)
     this.transaction(() => {
       const stmt = this.db.prepare('UPDATE todos SET sort = ? WHERE id = ?')
-      ids.forEach((id, i) => stmt.run(slots[i], id))
+      slots.forEach((sort, id) => stmt.run(sort, id))
     })
   }
 

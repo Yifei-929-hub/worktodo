@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { AppState, Todo } from '../shared/types'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { Todo } from '../shared/types'
 import { buildViews } from '../shared/views'
+import { Client } from './client'
 import { Detail } from './Detail'
 import { formatDay } from './format'
 import { TodoList } from './TodoList'
@@ -16,56 +17,79 @@ const NAV: [View, string][] = [
   ['trash', '回收站']
 ]
 
-const api = window.worktodo
+/** 完成后的输入条；draft 为 null 表示还没有改动过文字。 */
+interface Bar {
+  id: string
+  draft: string | null
+}
 
 export function App() {
-  const [state, setState] = useState<AppState | null>(null)
+  const [error, setError] = useState('')
+  const [client] = useState(() => new Client(window.worktodo, setError))
+  const state = useSyncExternalStore(client.subscribe, client.getSnapshot)
   const [view, setView] = useState<View>('today')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [justDone, setJustDone] = useState<string | null>(null)
-  const [error, setError] = useState('')
-
-  const run = useCallback(async (action: Promise<AppState>): Promise<boolean> => {
-    try {
-      setState(await action)
-      setError('')
-      return true
-    } catch (e) {
-      const text = e instanceof Error ? e.message : String(e)
-      setError(text.replace(/^Error invoking remote method '[^']*': (Error: )?/, ''))
-      return false
-    }
+  const [focusResult, setFocusResult] = useState(0)
+  // 连续操作可能早于重新渲染，判断以引用为准，状态只用于显示
+  const [bar, setBarState] = useState<Bar | null>(null)
+  const barRef = useRef<Bar | null>(null)
+  const setBar = useCallback((next: Bar | null) => {
+    barRef.current = next
+    setBarState(next)
   }, [])
 
+  /** 保存输入条里已写的文字并关闭。 */
+  const commitBar = useCallback(() => {
+    const current = barRef.current
+    setBar(null)
+    if (current && current.draft !== null) void client.update(current.id, { result: current.draft })
+  }, [client, setBar])
+
   useEffect(() => {
-    void run(api.getState())
-    return api.onState(setState)
-  }, [run])
+    void client.load()
+    const off = window.worktodo.onState(client.receive)
+    window.addEventListener('beforeunload', commitBar)
+    return () => {
+      off()
+      window.removeEventListener('beforeunload', commitBar)
+    }
+  }, [client, commitBar])
 
   const views = useMemo(() => (state ? buildViews(state.todos, state.today) : null), [state])
   if (!state || !views) return <div className="loading">{error || '正在打开…'}</div>
 
-  const live = (id: string | null): Todo | undefined =>
+  const live = (id: string | undefined | null): Todo | undefined =>
     state.todos.find((t) => t.id === id && t.deletedAt === null)
   const selected = live(selectedId)
-  const doneTodo = live(justDone)
+  const barTodo = live(bar?.id)
 
   const go = (next: View): void => {
     setView(next)
     setSelectedId(null)
   }
 
-  const toggle = async (t: Todo): Promise<void> => {
-    const done = t.doneAt === null
-    if (await run(api.setDone(t.id, done))) setJustDone(done ? t.id : null)
+  const select = (id: string): void => {
+    // 同一项的完成情况只在一处编辑：打开详情时先保存输入条
+    if (barRef.current?.id === id) commitBar()
+    setSelectedId(id)
   }
 
+  const toggle = (id: string): void => {
+    const todo = client.find(id)
+    if (!todo) return
+    const done = todo.doneAt === null
+    commitBar()
+    void client.setDone(id, done)
+    if (!done) return
+    if (id === selected?.id) setFocusResult((n) => n + 1)
+    else setBar({ id, draft: null })
+  }
   const listProps = {
     today: state.today,
     selectedId,
-    onSelect: setSelectedId,
-    onToggle: (t: Todo) => void toggle(t),
-    onReorder: (ids: string[]) => void run(api.reorder(ids))
+    onSelect: select,
+    onToggle: (t: Todo) => toggle(t.id),
+    onReorder: (ids: string[]) => void client.reorder(ids)
   }
 
   const counts: Partial<Record<View, number>> = {
@@ -101,7 +125,7 @@ export function App() {
           <QuickAdd
             key={view}
             hint={view === 'today' ? '添加今天的待办，按回车保存' : '添加到“未安排”，按回车保存'}
-            onAdd={(title) => run(api.add(title, view === 'today' ? state.today : null))}
+            onAdd={(title) => client.add(title, view === 'today' ? state.today : null)}
           />
         )}
 
@@ -150,19 +174,21 @@ export function App() {
             <TrashView
               todos={views.trash}
               now={state.now}
-              onRefresh={() => void run(api.getState())}
-              onRestore={(id) => void run(api.restore(id))}
-              onPurge={(id) => void run(api.purge(id))}
+              onRefresh={() => void client.load()}
+              onRestore={(id) => void client.restore(id)}
+              onPurge={(id) => void client.purge(id)}
             />
           )}
         </div>
 
-        {doneTodo && doneTodo.doneAt !== null && (
+        {bar && barTodo && (
           <ResultBar
-            key={doneTodo.id}
-            todo={doneTodo}
-            onSave={(result) => run(api.update(doneTodo.id, { result }))}
-            onClose={() => setJustDone(null)}
+            key={bar.id}
+            title={barTodo.title}
+            text={bar.draft ?? barTodo.result}
+            onText={(draft) => setBar({ id: bar.id, draft })}
+            onSave={commitBar}
+            onSkip={() => setBar(null)}
           />
         )}
         {error && (
@@ -177,9 +203,10 @@ export function App() {
         <Detail
           key={selected.id}
           todo={selected}
-          onChange={(patch) => run(api.update(selected.id, patch))}
-          onToggle={() => void toggle(selected)}
-          onRemove={() => void run(api.remove(selected.id))}
+          focusResult={focusResult}
+          onChange={(patch) => client.update(selected.id, patch)}
+          onToggle={() => toggle(selected.id)}
+          onRemove={() => void client.remove(selected.id)}
           onClose={() => setSelectedId(null)}
         />
       )}
@@ -194,9 +221,12 @@ function QuickAdd(props: { hint: string; onAdd: (title: string) => Promise<boole
       className="quick"
       onSubmit={(e) => {
         e.preventDefault()
+        // 立即清空，避免重复回车添加多条；失败时还原
         const value = text
+        if (value === '') return
+        setText('')
         void props.onAdd(value).then((ok) => {
-          if (ok) setText((current) => (current === value ? '' : current))
+          if (!ok) setText((current) => (current === '' ? value : current))
         })
       }}
     >
@@ -213,33 +243,34 @@ function QuickAdd(props: { hint: string; onAdd: (title: string) => Promise<boole
 }
 
 function ResultBar(props: {
-  todo: Todo
-  onSave: (result: string) => Promise<boolean>
-  onClose: () => void
+  title: string
+  text: string
+  onText: (text: string) => void
+  onSave: () => void
+  onSkip: () => void
 }) {
-  const [text, setText] = useState(props.todo.result)
   return (
     <form
       className="result-bar"
       onSubmit={(e) => {
         e.preventDefault()
-        void props.onSave(text).then((ok) => ok && props.onClose())
+        props.onSave()
       }}
     >
-      <label htmlFor="result-input">已完成“{props.todo.title}”，完成情况如何？</label>
+      <label htmlFor="result-input">已完成“{props.title}”，完成情况如何？</label>
       <div>
         <input
           id="result-input"
           placeholder="选填，写日志时会用到"
-          value={text}
+          value={props.text}
           autoFocus
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => props.onText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Escape' && !e.nativeEvent.isComposing) props.onClose()
+            if (e.key === 'Escape' && !e.nativeEvent.isComposing) props.onSkip()
           }}
         />
         <button type="submit">保存</button>
-        <button type="button" className="plain" onClick={props.onClose}>
+        <button type="button" className="plain" onClick={props.onSkip}>
           跳过
         </button>
       </div>

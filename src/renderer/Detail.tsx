@@ -11,19 +11,25 @@ const PRIORITIES: [Priority, string][] = [
 /** 修改即时保存，不需要保存按钮。 */
 export function Detail(props: {
   todo: Todo
+  /** 变大时把光标移到完成情况 */
+  focusResult: number
   onChange: (patch: TodoPatch) => Promise<boolean>
   onToggle: () => void
   onRemove: () => void
   onClose: () => void
 }) {
   const { todo, onChange } = props
-  const [title, setTitle] = useState(todo.title)
-  const [detail, setDetail] = useState(todo.detail)
-  const [result, setResult] = useState(todo.result)
-  // 完成情况也可能在底部的输入条里被修改
-  useEffect(() => setResult(todo.result), [todo.result])
-  const emptyTitle = title.trim() === ''
-
+  // 只在输入标题时保留草稿（可能暂时为空），其余字段直接显示当前数据
+  const [draft, setDraft] = useState<string | null>(null)
+  const emptyTitle = draft !== null && draft.trim() === ''
+  const resultRef = useRef<HTMLTextAreaElement>(null)
+  const { focusResult } = props
+  const focusSeen = useRef(focusResult)
+  useEffect(() => {
+    if (focusResult === focusSeen.current) return
+    focusSeen.current = focusResult
+    resultRef.current?.focus()
+  }, [focusResult])
   return (
     <aside className="detail" aria-label="待办详情">
       <div className="detail-top">
@@ -39,13 +45,13 @@ export function Detail(props: {
       <label className="field">
         <span>标题</span>
         <input
-          value={title}
+          value={draft ?? todo.title}
           aria-invalid={emptyTitle}
           onChange={(e) => {
-            setTitle(e.target.value)
+            setDraft(e.target.value)
             if (e.target.value.trim()) void onChange({ title: e.target.value })
           }}
-          onBlur={() => setTitle(todo.title)}
+          onBlur={() => setDraft(null)}
         />
         {emptyTitle && <em>标题不能为空，离开后将恢复原标题</em>}
       </label>
@@ -95,11 +101,8 @@ export function Detail(props: {
         <textarea
           rows={5}
           placeholder="计划做什么"
-          value={detail}
-          onChange={(e) => {
-            setDetail(e.target.value)
-            void onChange({ detail: e.target.value })
-          }}
+          value={todo.detail}
+          onChange={(e) => void onChange({ detail: e.target.value })}
         />
       </label>
       <label className="field">
@@ -107,11 +110,9 @@ export function Detail(props: {
         <textarea
           rows={5}
           placeholder="实际做了什么，写日志时优先使用"
-          value={result}
-          onChange={(e) => {
-            setResult(e.target.value)
-            void onChange({ result: e.target.value })
-          }}
+          ref={resultRef}
+          value={todo.result}
+          onChange={(e) => void onChange({ result: e.target.value })}
         />
       </label>
 

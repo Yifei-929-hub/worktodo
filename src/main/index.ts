@@ -24,6 +24,7 @@ const clock: Clock = () => {
 
 let win: BrowserWindow | null = null
 let store: TodoStore
+let ticker: NodeJS.Timeout | undefined
 
 function broadcast(): void {
   win?.webContents.send('state', store.state())
@@ -50,7 +51,7 @@ function registerIpc(): void {
 /** 每秒检查跨日和回收站到期，变化时通知界面。 */
 function startTicker(): void {
   let day = dayKey(clock())
-  setInterval(() => {
+  ticker = setInterval(() => {
     const today = dayKey(clock())
     const purged = store.purgeExpired()
     if (today !== day || purged > 0) {
@@ -95,7 +96,11 @@ if (!app.requestSingleInstanceLock()) {
     win.focus()
   })
   app.on('window-all-closed', () => app.quit())
-  app.on('will-quit', () => store?.close())
+  app.on('will-quit', () => {
+    // 先停定时器，否则退出过程中会访问已关闭的数据库
+    clearInterval(ticker)
+    store?.close()
+  })
 
   void app.whenReady().then(() => {
     try {

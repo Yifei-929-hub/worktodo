@@ -1,9 +1,25 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type DragEvent } from 'react'
 import type { Todo } from '../shared/types'
 import { formatDay } from './format'
 
 const PRIORITY_CLASS = ['', 'p-low', 'p-mid', 'p-high']
 const PRIORITY_TEXT = ['', '低优先级', '中优先级', '高优先级']
+
+let lastCheck = { id: '', x: 0, y: 0, at: 0 }
+
+/**
+ * 勾选后下方的行会移到鼠标下面，双击的第二下会误勾下一项。
+ * 行已更换，浏览器不再把它算作双击，因此按位置和时间判断。
+ */
+function isSlippedClick(id: string, e: Event): boolean {
+  if (!(e instanceof MouseEvent) || e.detail === 0) return false // 键盘操作
+  const slipped =
+    lastCheck.id !== id &&
+    e.timeStamp - lastCheck.at < 300 &&
+    Math.hypot(e.clientX - lastCheck.x, e.clientY - lastCheck.y) < 5
+  if (!slipped) lastCheck = { id, x: e.clientX, y: e.clientY, at: e.timeStamp }
+  return slipped
+}
 
 export function TodoList(props: {
   title: string
@@ -38,6 +54,24 @@ export function TodoList(props: {
     props.onReorder(ids)
   }
 
+  /** 放下后的目标位置：在行上取该行的位置；在行间空隙取上方可拖动行的数量；不可放下时为 -1。 */
+  const targetIndex = (e: DragEvent<HTMLUListElement>): number => {
+    const id = dragRef.current
+    if (id === null || !movable.includes(id)) return -1
+    const hit = (e.target as Element).closest('li')
+    if (hit) return movable.indexOf(hit.dataset.id ?? '')
+    return [...e.currentTarget.querySelectorAll('li')].filter((li) => {
+      if (li.dataset.id === id || !movable.includes(li.dataset.id ?? '')) return false
+      const box = li.getBoundingClientRect()
+      return box.top + box.height / 2 < e.clientY
+    }).length
+  }
+
+  const endDrag = (): void => {
+    setDragId(null)
+    setOverId(null)
+  }
+
   return (
     <section className={`group ${props.tone ?? ''}`} aria-label={props.title}>
       {props.collapsible ? (
@@ -48,13 +82,29 @@ export function TodoList(props: {
         props.todos.length > 0 && <h2 className="group-title">{props.title}</h2>
       )}
       {open && (
-        <ul>
+        <ul
+          onDragOver={(e) => {
+            const index = targetIndex(e)
+            setOverId(index < 0 ? null : movable[index])
+            if (index >= 0) e.preventDefault()
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOverId(null)
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            const index = targetIndex(e)
+            if (dragRef.current !== null) move(dragRef.current, index)
+            endDrag()
+          }}
+        >
           {props.todos.map((t) => {
             const index = movable.indexOf(t.id)
             const draggable = index >= 0 && movable.length > 1
             return (
               <li
                 key={t.id}
+                data-id={t.id}
                 data-todo={t.title}
                 className={[
                   'row',
@@ -73,27 +123,15 @@ export function TodoList(props: {
                   e.dataTransfer.setData('text/plain', t.id)
                   setDragId(t.id)
                 }}
-                onDragOver={(e) => {
-                  if (dragRef.current === null || index < 0) return
-                  e.preventDefault()
-                  setOverId(t.id)
-                }}
-                onDrop={(e) => {
-                  e.preventDefault()
-                  if (dragRef.current !== null && index >= 0) move(dragRef.current, index)
-                  setDragId(null)
-                  setOverId(null)
-                }}
-                onDragEnd={() => {
-                  setDragId(null)
-                  setOverId(null)
-                }}
+                onDragEnd={endDrag}
               >
                 <input
                   type="checkbox"
                   aria-label={`完成：${t.title}`}
                   checked={t.doneAt !== null}
-                  onChange={() => props.onToggle(t)}
+                  onChange={(e) => {
+                    if (!isSlippedClick(t.id, e.nativeEvent)) props.onToggle(t)
+                  }}
                 />
                 <button
                   className="row-main"

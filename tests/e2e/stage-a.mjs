@@ -1,6 +1,6 @@
 // 在真实 Electron 窗口中检查阶段 A（A1–A6）。先构建，再运行：npm run e2e
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,6 +9,7 @@ import { _electron } from 'playwright-core'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const dir = mkdtempSync(join(tmpdir(), 'worktodo-e2e-'))
 const clockFile = join(dir, 'clock.txt')
+const crashFile = join(dir, 'crash.txt')
 const shots = process.env.WORKTODO_SHOTS
 if (shots) mkdirSync(shots, { recursive: true })
 
@@ -40,6 +41,10 @@ async function launch() {
   const env = { ...process.env, WORKTODO_USER_DATA: join(dir, 'user-data'), WORKTODO_TEST_CLOCK: clockFile }
   delete env.ELECTRON_RUN_AS_NODE
   app = await _electron.launch({ args: [root], env })
+  // 主进程未捕获的错误默认弹窗，这里改为记录
+  await app.evaluate((_e, file) => {
+    process.on('uncaughtException', (e) => process.getBuiltinModule('node:fs').appendFileSync(file, e.stack + '\n'))
+  }, crashFile)
   page = await app.firstWindow()
   page.on('pageerror', (e) => problems.push(String(e)))
   page.on('console', (m) => m.type() === 'error' && problems.push(m.text()))
@@ -179,9 +184,120 @@ const steps = {
     await expectTitles('今天已完成', ['乙'])
     await select('甲')
     assert.equal(await detail().getByLabel('完成情况').inputValue(), '甲已交付')
+    // 详情已打开时不再弹输入条，光标直接到“完成情况”（P1：只有一处编辑）
     await row('甲').getByRole('checkbox').click()
-    await page.getByRole('button', { name: '跳过' }).click()
     await expectTitles('今天已完成', ['甲', '乙'])
+    assert.equal(await page.locator('.result-bar').count(), 0)
+    assert.equal(await detail().getByLabel('完成情况').evaluate((e) => e === document.activeElement), true)
+  },
+  'P1 P5 输入条的文字不覆盖、不丢失，跳过才放弃': async () => {
+    const bar = page.getByPlaceholder('选填，写日志时会用到')
+    let result = detail().getByLabel('完成情况')
+    await nav('今天')
+    for (const t of ['戊', '己', '庚']) await add(t)
+    await row('戊').getByRole('checkbox').click()
+    await bar.fill('戊的文字')
+    await page.waitForTimeout(400) // 同一位置 300 毫秒内的第二下视为双击
+    await row('己').getByRole('checkbox').click() // 未保存就勾选另一项
+    await eventually(async () => assert.equal(await bar.inputValue(), ''), '输入条未切换')
+    await bar.fill('己要放弃')
+    await page.getByRole('button', { name: '跳过' }).click()
+    await page.waitForTimeout(400)
+    await row('庚').getByRole('checkbox').click()
+    await bar.fill('庚的文字')
+    await select('庚') // 打开同一项详情时先保存输入条
+    assert.equal(await page.locator('.result-bar').count(), 0)
+    assert.equal(await result.inputValue(), '庚的文字')
+    await result.fill('庚改过')
+    await select('戊')
+    assert.equal(await result.inputValue(), '戊的文字')
+    await select('己')
+    assert.equal(await result.inputValue(), '')
+    await select('庚')
+    assert.equal(await result.inputValue(), '庚改过')
+    // 关闭窗口前未保存的文字
+    await nav('今天')
+    await add('辛')
+    await row('辛').getByRole('checkbox').click()
+    await bar.fill('辛的文字')
+    await relaunch()
+    await group('今天已完成').locator('button.group-title').click()
+    await select('辛')
+    result = detail().getByLabel('完成情况') // 重启后是新的页面
+    assert.equal(await result.inputValue(), '辛的文字')
+    await page.waitForTimeout(200)
+    assert.equal(await result.evaluate((e) => e === document.activeElement), false)
+  },
+  'P3 P4 P6 快速输入不丢字、不回退、不重复': async () => {
+    await nav('未来')
+    const input = page.getByLabel('快速添加')
+    await input.fill('快速一')
+    await page.keyboard.press('Enter')
+    await page.keyboard.press('Enter')
+    for (let i = 0; i < 10; i++) {
+      await page.keyboard.type(`连${i}项`)
+      await page.keyboard.press('Enter')
+    }
+    const expected = ['无日期事项', '快速一', ...Array.from({ length: 10 }, (_, i) => `连${i}项`)]
+    await expectTitles('未安排', expected)
+    assert.equal(await page.locator('.error').count(), 0)
+    await select('快速一')
+    const text = 'abcdefghij'.repeat(20)
+    await detail().getByLabel('完成情况').focus()
+    await page.keyboard.type(text)
+    assert.equal(await detail().getByLabel('完成情况').inputValue(), text)
+    const title = detail().getByLabel('标题')
+    for (const ch of ['x', 'y']) {
+      await title.focus()
+      await page.keyboard.press('End')
+      await page.keyboard.type(ch)
+      await page.keyboard.press('Tab')
+    }
+    assert.equal(await title.inputValue(), '快速一xy')
+    await page.waitForTimeout(200)
+    assert.equal(await detail().getByLabel('完成情况').inputValue(), text)
+    await row('快速一xy').waitFor()
+  },
+  'P7 P8 双击和连按': async () => {
+    await detail().locator('.check input').dblclick()
+    await page.waitForTimeout(200)
+    assert.equal(await detail().locator('.check input').isChecked(), false)
+    // 列表中双击只勾选这一项，不误勾移上来的下一项
+    const before = await titlesIn('未安排')
+    const box = await row('连0项').getByRole('checkbox').boundingBox()
+    await page.mouse.dblclick(box.x + 8, box.y + 8, { delay: 20 })
+    await page.waitForTimeout(200)
+    await expectTitles('未安排', before.filter((t) => t !== '连0项'))
+    await row('连1项').locator('.row-main').focus()
+    await page.keyboard.press('Alt+ArrowDown')
+    await page.keyboard.press('Alt+ArrowDown')
+    const after = await titlesIn('未安排')
+    assert.equal(after.indexOf('连1项') - after.indexOf('连2项'), 2)
+  },
+  'P2 拖到行间空隙生效，移出列表后提示线消失': async () => {
+    const drag = async (from, x, y) => {
+      const f = await row(from).boundingBox()
+      await page.mouse.move(f.x + 150, f.y + f.height / 2)
+      await page.mouse.down()
+      await page.mouse.move(x, y, { steps: 12 })
+      await page.waitForTimeout(100)
+    }
+    const marks = () => page.locator('.drop-before, .drop-after').count()
+    const list = await titlesIn('未安排')
+    const [a, b, c] = list.slice(0, 3)
+    const ra = await row(a).boundingBox()
+    const rb = await row(b).boundingBox()
+    await drag(c, ra.x + 150, (ra.y + ra.height + rb.y) / 2)
+    assert.equal(await marks(), 1)
+    await page.mouse.up()
+    await expectTitles('未安排', [a, c, b, ...list.slice(3)])
+    await drag(c, ra.x + 150, ra.y + ra.height / 2)
+    await page.mouse.move(ra.x + 150, 20, { steps: 8 })
+    await page.waitForTimeout(100)
+    assert.equal(await marks(), 0)
+    await page.mouse.up()
+    await expectTitles('未安排', [a, c, b, ...list.slice(3)])
+    await nav('今天')
   },
   'A6 删除、恢复、彻底删除需确认': async () => {
     await add('待删')
@@ -248,6 +364,13 @@ const steps = {
     assert.equal(await page.evaluate(() => fetch('https://example.invalid/').then(() => 'ok', () => 'blocked')), 'blocked')
     assert.deepEqual(requests.filter((u) => !/^(file|data|blob):/.test(u) && !u.includes('example.invalid')), [])
     assert.deepEqual(problems.filter((p) => !p.includes('example.invalid') && !p.includes('Content Security Policy')), [])
+  },
+  '退出时主进程无报错': async () => {
+    assert.equal(existsSync(crashFile) ? readFileSync(crashFile, 'utf8') : '', '')
+    // 退出处理执行后、进程结束前，定时器不应再访问数据库
+    await app.evaluate(({ app }) => void app.emit('will-quit', { preventDefault() {} }))
+    await page.waitForTimeout(2500)
+    assert.equal(existsSync(crashFile) ? readFileSync(crashFile, 'utf8') : '', '')
   }
 }
 
