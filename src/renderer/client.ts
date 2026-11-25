@@ -20,7 +20,7 @@ interface Failure {
   invalid: boolean
 }
 
-function parseError(e: unknown): Failure {
+export function parseError(e: unknown): Failure {
   const raw = e instanceof Error ? e.message : String(e)
   const text = raw.replace(/^Error invoking remote method '[^']*': (?:(\w*Error): )?/, '')
   const invalid = /^Error invoking remote method '[^']*': InputError: /.test(raw)
@@ -66,8 +66,14 @@ export class Client {
   }
 
   receive = (state: AppState): void => {
-    this.server = state
+    this.accept(state)
     this.refresh()
+  }
+
+  /** 恢复备份后，恢复前未保存的修改不再适用。 */
+  private accept(state: AppState): void {
+    if (this.server && state.epoch !== this.server.epoch) this.unsaved.clear()
+    this.server = state
   }
 
   load(): Promise<boolean> {
@@ -159,6 +165,10 @@ export class Client {
     return this.run((s) => ({ ...s, missed: [] }), () => this.api.dismissMissed())
   }
 
+  restoreBackup(): Promise<boolean> {
+    return this.run((s) => s, () => this.api.confirmRestore())
+  }
+
   setFloatOpen(open: boolean): Promise<boolean> {
     return this.run((s) => ({ ...s, float: { ...s.float, open } }), () => this.api.setFloatOpen(open))
   }
@@ -178,7 +188,7 @@ export class Client {
     const result = call()
     this.refresh()
     try {
-      this.server = await result
+      this.accept(await result)
       onDone()
       this.onNotice(null)
       return true

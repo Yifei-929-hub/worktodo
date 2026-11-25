@@ -8,7 +8,7 @@ const todo = (id: string, sort: number): Todo => ({
 })
 const base = (patch: Partial<Todo> = {}): AppState => ({
   now: 1000, today: '2030-03-10', todos: [{ ...todo('a', 1), ...patch }, todo('b', 2)],
-  missed: [], float: { open: false, pinned: true }
+  missed: [], float: { open: false, pinned: true }, epoch: 0
 })
 
 // 每次调用都挂起，由测试决定何时、以什么结果返回

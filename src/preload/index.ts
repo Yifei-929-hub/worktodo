@@ -24,6 +24,12 @@ const api: Api = {
     ipcRenderer.on('focus', handler)
     return () => ipcRenderer.off('focus', handler)
   },
+  listBackups: () => ipcRenderer.invoke('backup:list'),
+  exportBackup: () => ipcRenderer.invoke('backup:export'),
+  prepareRestore: (name) => ipcRenderer.invoke('backup:prepare', name),
+  cancelRestore: () => ipcRenderer.invoke('backup:cancel'),
+  confirmRestore: () => ipcRenderer.invoke('backup:restore'),
+  openBackupFolder: () => ipcRenderer.invoke('backup:folder'),
   onState: (listener) => {
     const handler = (_event: IpcRendererEvent, state: AppState): void => listener(state)
     ipcRenderer.on('state', handler)

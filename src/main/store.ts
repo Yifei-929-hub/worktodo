@@ -5,7 +5,7 @@ import { remindTimes } from '../shared/reminders'
 import type { Priority, Remind, Todo, TodoPatch, TodoState } from '../shared/types'
 import { dayKey, isValidDate, isValidTime, TRASH_MS } from '../shared/views'
 
-const SCHEMA_VERSION = 5
+export const SCHEMA_VERSION = 5
 
 /** 操作本身无效，重试也不会成功；名称会随错误传到界面。 */
 export class InputError extends Error {
@@ -228,6 +228,46 @@ export class TodoStore {
       }))
     }
     return due.sort((a, b) => a.at - b.at)
+  }
+
+  /** 把全部数据写成一个独立的文件。 */
+  exportTo(path: string): void {
+    this.db.prepare('VACUUM INTO ?').run(path)
+  }
+
+  /** 逐项核对内容，供恢复前校验。 */
+  assertValid(): void {
+    for (const t of this.state().todos) {
+      cleanTitle(t.title)
+      cleanText(t.detail)
+      cleanText(t.result)
+      cleanDate(t.date)
+      cleanTime(t.time)
+      cleanPriority(t.priority)
+      cleanRemind(t.remind)
+      if (t.time && !t.date) throw new InputError('日期无效')
+      checkEnd(t)
+      const numbers = [t.sort, t.createdAt, t.doneAt ?? 0, t.deletedAt ?? 0]
+      if (typeof t.id !== 'string' || numbers.some((n) => !Number.isFinite(n))) throw new InputError('内容无效')
+    }
+  }
+
+  /** 用同版本的另一份数据整体替换；失败时整体回滚。 */
+  replaceFrom(path: string): void {
+    this.db.prepare('ATTACH ? AS source').run(path)
+    try {
+      this.transaction(() => {
+        for (const table of ['reminded', 'todos', 'settings']) this.db.exec(`DELETE FROM main.${table}`)
+        for (const table of ['todos', 'reminded', 'settings']) {
+          const rows = this.db.prepare(`PRAGMA main.table_info(${table})`).all() as { name: string }[]
+          const columns = rows.map((r) => r.name).join(', ')
+          this.db.exec(`INSERT INTO main.${table} (${columns}) SELECT ${columns} FROM source.${table}`)
+        }
+        for (const t of this.state().todos) this.settleReminder(t)
+      })
+    } finally {
+      this.db.exec('DETACH source')
+    }
   }
 
   getSetting(key: string): string | null {

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, screen, session, Tray } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from 'electron'
 import type { Rectangle } from 'electron'
 import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -6,6 +6,7 @@ import icon256 from '../../resources/icon-256.png?asset'
 import icon32 from '../../resources/icon-32.png?asset'
 import type { AppState, MissedReminder, TodoPatch } from '../shared/types'
 import { dayKey } from '../shared/views'
+import { BACKUP_EXT, Backups, stamp } from './backup'
 import { notify } from './notify'
 import { TodoStore, type Clock } from './store'
 
@@ -35,6 +36,11 @@ let win: BrowserWindow | null = null
 let floatWin: BrowserWindow | null = null
 let tray: Tray | null = null
 let store: TodoStore
+let backups: Backups
+let dbPath = ''
+let epoch = 0
+/** 自动备份失败后，到这一时刻再试 */
+let backupRetryAt = 0
 let ticker: NodeJS.Timeout | undefined
 let quitting = false
 let missed: MissedReminder[] = []
@@ -45,7 +51,7 @@ const floatSettings = (): AppState['float'] => ({
   pinned: store.getSetting('floatPinned') !== '0'
 })
 
-const state = (): AppState => ({ ...store.state(), missed, float: floatSettings() })
+const state = (): AppState => ({ ...store.state(), missed, float: floatSettings(), epoch })
 
 function broadcast(except?: Electron.WebContents): void {
   const s = state()
@@ -270,7 +276,19 @@ function checkReminders(): boolean {
   return false
 }
 
-/** 每秒检查跨日、回收站到期和提醒，变化时通知界面。 */
+/** 当天首次启动和跨天运行时各备份一次。 */
+function autoBackup(): void {
+  if (clock() < backupRetryAt) return
+  backupRetryAt = 0
+  try {
+    backups.auto(dbPath)
+  } catch (e) {
+    console.warn('自动备份失败，一分钟后重试', e)
+    backupRetryAt = clock() + 60_000
+  }
+}
+
+/** 每秒检查跨日、回收站到期、提醒和自动备份，变化时通知界面。 */
 function startTicker(): void {
   let day = dayKey(clock())
   ticker = setInterval(() => {
@@ -282,6 +300,7 @@ function startTicker(): void {
     warn('检查提醒失败，下一秒重试', () => {
       if (checkReminders()) changed = true
     })
+    autoBackup()
     if (changed) {
       day = today
       warn('通知界面失败', () => broadcast())
@@ -320,6 +339,51 @@ function registerIpc(): void {
   handle('float:open', (open: boolean) => setFloatOpen(open === true))
   handle('float:pin', (pinned: boolean) => setFloatPinned(pinned === true))
   handle('main:open', (id: string | null) => showMain(typeof id === 'string' ? id : null), false)
+  // 不改变待办状态的调用
+  const raw = (channel: string, action: (...args: never[]) => unknown): void => {
+    ipcMain.handle(channel, (event, ...args) => {
+      check(event)
+      return action(...(args as never[]))
+    })
+  }
+  raw('backup:list', () => backups.list())
+  raw('backup:export', async () => {
+    if (!win) return null
+    const { filePath } = await dialog.showSaveDialog(win, {
+      title: '导出备份',
+      defaultPath: join(app.getPath('documents'), `WorkTodo-备份-${stamp(clock())}.${BACKUP_EXT}`),
+      filters: [{ name: 'WorkTodo 备份', extensions: [BACKUP_EXT] }]
+    })
+    if (!filePath) return null
+    backups.export(store, filePath, app.getPath('userData'))
+    return filePath
+  })
+  raw('backup:prepare', async (name: string | null) => {
+    if (typeof name === 'string') return backups.prepare({ name })
+    if (!win) return null
+    const { filePaths } = await dialog.showOpenDialog(win, {
+      title: '选择备份文件',
+      properties: ['openFile'],
+      filters: [
+        { name: 'WorkTodo 备份', extensions: [BACKUP_EXT] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    })
+    return filePaths[0] ? backups.prepare({ path: filePaths[0] }) : null
+  })
+  raw('backup:cancel', () => backups.cancel())
+  raw('backup:folder', async () => {
+    const error = await shell.openPath(backups.dir)
+    if (error) throw new Error(error)
+  })
+  handle('backup:restore', () => {
+    backups.restore(store)
+    epoch++
+    missed = []
+    floatWin?.setAlwaysOnTop(floatSettings().pinned)
+    // 悬浮窗是否打开以当前为准
+    store.setSetting('floatOpen', floatWin ? '1' : '0')
+  })
   ipcMain.handle('focus:take', (event): string | null => {
     check(event)
     if (event.sender !== win?.webContents) return null
@@ -347,7 +411,11 @@ if (!app.requestSingleInstanceLock()) {
     try {
       const dir = join(app.getPath('userData'), 'data')
       mkdirSync(dir, { recursive: true })
-      store = new TodoStore(join(dir, 'worktodo.db'), clock)
+      dbPath = join(dir, 'worktodo.db')
+      backups = new Backups(join(app.getPath('userData'), 'backups'), clock)
+      // 在数据升级之前备份
+      autoBackup()
+      store = new TodoStore(dbPath, clock)
     } catch (e) {
       dialog.showErrorBox('无法打开数据', e instanceof Error ? e.message : String(e))
       app.exit(1)

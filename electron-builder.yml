@@ -1,0 +1,36 @@
+appId: io.github.yifei929hub.worktodo
+productName: WorkTodo
+directories:
+  output: dist
+  buildResources: resources
+files:
+  - out/**
+  - package.json
+  - resources/*.png
+electronLanguages:
+  - zh-CN
+  - en-US
+npmRebuild: false
+publish: null
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon-256.png
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: WorkTodo
+  artifactName: WorkTodo-Setup-${version}.${ext}
+  uninstallDisplayName: WorkTodo
+  deleteAppDataOnUninstall: false
+  # 没有自动更新，不需要差分信息
+  differentialPackage: false
+  installerLanguages:
+    - zh_CN
+  language: '2052'
+  include: resources/installer.nsh

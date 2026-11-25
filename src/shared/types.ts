@@ -43,6 +43,20 @@ export interface AppState extends TodoState {
   /** 程序未运行时错过的提醒，用户关闭提示前保留 */
   missed: MissedReminder[]
   float: { open: boolean; pinned: boolean }
+  /** 每次恢复备份加一；变化时界面丢弃未保存的修改 */
+  epoch: number
+}
+
+export interface BackupInfo {
+  name: string
+  kind: 'auto' | 'before-restore'
+  time: number
+}
+
+export interface BackupPreview {
+  /** 未删除的待办数量 */
+  count: number
+  time: number
 }
 
 export interface Api {
@@ -62,5 +76,13 @@ export interface Api {
   /** 取走等待定位的待办 */
   takeFocus(): Promise<string | null>
   onFocus(listener: (id: string) => void): () => void
+  listBackups(): Promise<BackupInfo[]>
+  /** 返回保存的位置；取消时为 null */
+  exportBackup(): Promise<string | null>
+  /** name 为空时由用户选择文件；取消时为 null */
+  prepareRestore(name: string | null): Promise<BackupPreview | null>
+  cancelRestore(): Promise<void>
+  confirmRestore(): Promise<AppState>
+  openBackupFolder(): Promise<void>
   onState(listener: (state: AppState) => void): () => void
 }

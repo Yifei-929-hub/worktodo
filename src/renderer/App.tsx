@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Todo } from '../shared/types'
 import { buildViews } from '../shared/views'
+import { BackupView } from './BackupView'
 import { Calendar } from './Calendar'
 import { Client, type Notice } from './client'
 import { Detail } from './Detail'
@@ -9,7 +10,7 @@ import { QuickAdd } from './QuickAdd'
 import { TodoList } from './TodoList'
 import { TrashView } from './TrashView'
 
-type View = 'today' | 'future' | 'calendar' | 'done' | 'log' | 'trash'
+type View = 'today' | 'future' | 'calendar' | 'done' | 'log' | 'trash' | 'backup'
 
 const NAV: [View, string][] = [
   ['today', '今天'],
@@ -17,7 +18,8 @@ const NAV: [View, string][] = [
   ['calendar', '日历'],
   ['done', '已完成'],
   ['log', '工作日志'],
-  ['trash', '回收站']
+  ['trash', '回收站'],
+  ['backup', '备份与恢复']
 ]
 
 /** 完成后的输入条；draft 为 null 表示还没有改动过文字。 */
@@ -66,6 +68,13 @@ export function App() {
     }
   }, [client, commitBar])
 
+  // 恢复备份后，之前选中的和正在填的不再适用
+  const epoch = state?.epoch
+  useEffect(() => {
+    setBar(null)
+    setSelectedId(null)
+  }, [epoch, setBar])
+
   // 等数据加载后再定位；期间收到的定位由主进程保留
   const locateRef = useRef<(id: string) => void>(() => {})
   const loaded = state !== null
@@ -88,6 +97,8 @@ export function App() {
   const barTodo = live(bar?.id)
 
   const go = (next: View): void => {
+    // 先保存正在填的文字，备份里才会有
+    if (next === 'backup') commitBar()
     setView(next)
     setSelectedId(null)
   }
@@ -248,7 +259,14 @@ export function App() {
             ) : (
               <p className="empty">完成的待办会出现在这里。</p>
             ))}
-          {view === 'log' && <p className="empty">工作日志将在阶段 C 提供。</p>}
+          {view === 'backup' && (
+            <BackupView
+              unsaved={client.hasUnsaved()}
+              today={state.today}
+              onRestore={() => client.restoreBackup()}
+            />
+          )}
+          {view === 'log' && <p className="empty">工作日志将在后续版本提供。</p>}
           {view === 'trash' && (
             <TrashView
               todos={views.trash}
