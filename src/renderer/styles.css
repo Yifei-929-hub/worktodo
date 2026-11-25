@@ -1,0 +1,98 @@
+:root {
+  --paper: #f6f5f1;
+  --card: #ffffff;
+  --ink: #23302c;
+  --muted: #66736e;
+  --line: #dedfd8;
+  --pine: #1f6b5a;
+  --pine-soft: #e2eeea;
+  --red: #b83a32;
+  --amber: #b7791f;
+  --sky: #3f78a8;
+  color: var(--ink);
+  font: 14px/1.5 'Microsoft YaHei UI', 'Segoe UI', sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); }
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+ul { list-style: none; margin: 0; padding: 0; }
+:focus-visible { outline: 2px solid var(--pine); outline-offset: 1px; }
+
+.app { display: flex; height: 100vh; }
+.loading { padding: 48px; }
+
+.nav { width: 176px; flex: none; padding: 20px 12px; border-right: 1px solid var(--line); }
+.brand { padding: 0 10px 18px; font-size: 17px; font-weight: 700; color: var(--pine); }
+.nav-item { display: flex; justify-content: space-between; width: 100%; padding: 8px 10px; margin-bottom: 2px; border: 0; border-radius: 6px; background: none; text-align: left; }
+.nav-item:hover { background: #ecebe5; }
+.nav-item[aria-current] { background: var(--pine-soft); color: var(--pine); font-weight: 600; }
+.count { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+
+.main { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; padding: 20px 28px 0; }
+.head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+h1 { margin: 0; font-size: 22px; }
+.sub, .hint, .empty { color: var(--muted); }
+.empty { padding: 28px 0; }
+.quick { display: flex; gap: 8px; margin-bottom: 12px; }
+.quick input { flex: 1; min-width: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+.quick button, .result-bar button[type='submit'] { padding: 0 16px; border: 0; border-radius: 8px; background: var(--pine); color: #fff; }
+.scroll { flex: 1; overflow-y: auto; padding: 2px 2px 24px; }
+
+.group { margin-bottom: 18px; }
+.group-title { margin: 8px 0 4px; padding: 0; border: 0; background: none; font-size: 13px; font-weight: 600; color: var(--muted); }
+.late .group-title { color: var(--red); }
+.row { position: relative; display: flex; align-items: center; gap: 12px; padding: 4px 12px; margin-bottom: 4px; border: 1px solid transparent; border-radius: 8px; background: var(--card); }
+.row:hover { border-color: var(--line); }
+.is-selected, .is-selected:hover { border-color: var(--pine); }
+.row[draggable='true'] { cursor: grab; }
+.drop-before { box-shadow: 0 -2px 0 var(--pine); }
+.drop-after { box-shadow: 0 2px 0 var(--pine); }
+.row-main { display: flex; flex: 1; flex-direction: column; min-width: 0; padding: 5px 0; border: 0; background: none; text-align: left; }
+.row-title { overflow-wrap: anywhere; }
+.row-note { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--muted); }
+.is-done .row-title { color: var(--muted); text-decoration: line-through; }
+.when { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.late .when { color: var(--red); }
+.prio { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.p-high .prio { background: var(--red); }
+.p-mid .prio { background: var(--amber); }
+.p-low .prio { background: var(--sky); }
+input[type='checkbox'] { flex: none; width: 17px; height: 17px; margin: 0; accent-color: var(--pine); }
+.p-high input[type='checkbox'] { outline: 2px solid var(--red); border-radius: 3px; }
+.p-mid input[type='checkbox'] { outline: 2px solid var(--amber); border-radius: 3px; }
+.p-low input[type='checkbox'] { outline: 2px solid var(--sky); border-radius: 3px; }
+
+.plain { padding: 3px 8px; border: 0; border-radius: 6px; background: none; color: var(--pine); }
+.plain:hover { background: var(--pine-soft); }
+.warn { color: var(--red); }
+.danger { padding: 6px 14px; border: 1px solid var(--red); border-radius: 8px; background: none; color: var(--red); }
+.danger:hover { background: #f8e9e7; }
+
+.detail { width: 320px; flex: none; overflow-y: auto; padding: 20px; border-left: 1px solid var(--line); background: var(--card); }
+.detail-top { display: flex; justify-content: space-between; margin-bottom: 14px; }
+.check { display: flex; align-items: center; gap: 8px; }
+.field { display: block; min-width: 0; margin: 0 0 14px; padding: 0; border: 0; }
+.field > span, .field > legend { display: block; margin-bottom: 4px; padding: 0; font-size: 12px; color: var(--muted); }
+.field > input, .field > textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+.field textarea { resize: vertical; }
+.field em { font-size: 12px; font-style: normal; color: var(--red); }
+.pair { display: grid; grid-template-columns: 3fr 2fr; gap: 8px; }
+.pair .field { margin-bottom: 4px; }
+.clear { min-height: 28px; margin-bottom: 8px; }
+.seg { display: flex; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; }
+.seg label { flex: 1; text-align: center; }
+.seg input { position: absolute; opacity: 0; }
+.seg span { display: block; padding: 5px 0; cursor: pointer; }
+.seg input:checked + span { background: var(--pine-soft); color: var(--pine); font-weight: 600; }
+.seg input:focus-visible + span { outline: 2px solid var(--pine); outline-offset: -2px; }
+
+.result-bar { margin: 0 0 14px; padding: 12px; border: 1px solid var(--pine); border-radius: 8px; background: var(--card); }
+.result-bar label { display: block; margin-bottom: 6px; overflow-wrap: anywhere; }
+.result-bar div { display: flex; gap: 8px; }
+.result-bar input { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.error { display: flex; justify-content: space-between; margin-bottom: 14px; padding: 8px 12px; border-radius: 8px; background: #f8e9e7; color: var(--red); }
+.error button { border: 0; background: none; color: inherit; text-decoration: underline; }
+dialog { max-width: 400px; padding: 20px; border: 1px solid var(--line); border-radius: 10px; color: inherit; overflow-wrap: anywhere; }
+dialog::backdrop { background: rgb(35 48 44 / 35%); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
