@@ -88,7 +88,7 @@ async function add(title, p = page) {
 }
 async function setTime(title, time, remind) {
   await row(title).locator('.row-main').click()
-  await detail().locator('input[type=time]').fill(time)
+  await detail().getByLabel('时间', { exact: true }).fill(time)
   if (remind) await detail().getByLabel('提醒').selectOption({ label: remind })
   await row(title).getByText(time).waitFor()
   if (remind) {

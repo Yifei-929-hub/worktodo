@@ -74,10 +74,15 @@ export class Client {
     return this.run((s) => s, () => this.api.getState())
   }
 
-  add(title: string, date: string | null): Promise<boolean> {
+  add(
+    title: string,
+    date: string | null,
+    time: string | null = null,
+    endTime: string | null = null
+  ): Promise<boolean> {
     return this.run(
       (s) => s,
-      () => this.api.add(title, date),
+      () => this.api.add(title, date, time, endTime),
       (e) => ({ ...e, text: e.invalid ? e.text : `未能添加“${title}”：${e.text}` })
     )
   }
@@ -190,7 +195,7 @@ export class Client {
   /**
    * 本次修改加上未保存的字段，都取修改后应显示的值：
    * 未保存的字段可能有更新的输入正在保存，不能用旧值覆盖；
-   * 日期和时间互相影响，涉及其一就一并发送最终结果，不让旧时间恢复已清空的日期。
+   * 日期、开始和结束时间互相影响，涉及其一就一并发送最终结果，不让旧时间恢复已清空的日期。
    */
   private fullPatch(id: string, patch: TodoPatch): TodoPatch {
     const todo = this.find(id)
@@ -200,7 +205,8 @@ export class Client {
       ...(this.unsaved.get(id)?.keys() ?? []),
       ...(Object.keys(patch) as Field[])
     ])
-    if (fields.has('date') || fields.has('time')) fields.add('date').add('time')
+    const moment: Field[] = ['date', 'time', 'endTime']
+    if (moment.some((f) => fields.has(f))) moment.forEach((f) => fields.add(f))
     return Object.fromEntries([...fields].map((field) => [field, target[field]])) as TodoPatch
   }
   private unsavedPatch(id: string): TodoPatch {

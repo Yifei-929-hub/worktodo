@@ -10,6 +10,8 @@ export interface Todo {
   date: string | null
   /** 本地时间 HH:MM；有时间必有日期 */
   time: string | null
+  /** 结束时间 HH:MM；晚于开始，同一天 */
+  endTime: string | null
   detail: string
   result: string
   priority: Priority
@@ -21,7 +23,7 @@ export interface Todo {
 }
 
 export type TodoPatch = Partial<
-  Pick<Todo, 'title' | 'date' | 'time' | 'detail' | 'result' | 'priority' | 'remind'>
+  Pick<Todo, 'title' | 'date' | 'time' | 'endTime' | 'detail' | 'result' | 'priority' | 'remind'>
 >
 
 export interface TodoState {
@@ -45,7 +47,7 @@ export interface AppState extends TodoState {
 
 export interface Api {
   getState(): Promise<AppState>
-  add(title: string, date: string | null): Promise<AppState>
+  add(title: string, date: string | null, time?: string | null, endTime?: string | null): Promise<AppState>
   update(id: string, patch: TodoPatch): Promise<AppState>
   setDone(id: string, done: boolean): Promise<AppState>
   reorder(ids: string[]): Promise<AppState>

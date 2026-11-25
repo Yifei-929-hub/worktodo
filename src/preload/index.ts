@@ -3,7 +3,7 @@ import type { Api, AppState } from '../shared/types'
 
 const api: Api = {
   getState: () => ipcRenderer.invoke('state:get'),
-  add: (title, date) => ipcRenderer.invoke('todo:add', title, date),
+  add: (title, date, time, endTime) => ipcRenderer.invoke('todo:add', title, date, time, endTime),
   update: (id, patch) => ipcRenderer.invoke('todo:update', id, patch),
   setDone: (id, done) => ipcRenderer.invoke('todo:done', id, done),
   reorder: (ids) => ipcRenderer.invoke('todo:reorder', ids),

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { REMIND_OPTIONS } from '../shared/reminders'
+import { shiftEnd, toMinutes, toTime } from '../shared/rules'
 import type { Priority, Todo, TodoPatch } from '../shared/types'
 
 const PRIORITIES: [Priority, string][] = [
@@ -26,6 +27,18 @@ export function Detail(props: {
   const resultRef = useRef<HTMLTextAreaElement>(null)
   const { focusResult } = props
   const focusSeen = useRef(focusResult)
+  // 键盘输入开始时间会经过中间值（可能被截到 23:59），只要没有从别处改过，就以最初的时长为准
+  type Moment = Pick<Todo, 'time' | 'endTime'>
+  const timeBase = useRef<{ base: Moment; last: Moment } | null>(null)
+  const changeTime = (time: string): Promise<boolean> => {
+    const kept = timeBase.current
+    const same = kept && kept.last.time === todo.time && kept.last.endTime === todo.endTime
+    const base = same ? kept.base : { time: todo.time, endTime: todo.endTime }
+    if (!base.endTime) return onChange({ time })
+    const last = { time, endTime: shiftEnd(base, time) }
+    timeBase.current = { base, last }
+    return onChange(last)
+  }
   useEffect(() => {
     if (focusResult === focusSeen.current) return
     focusSeen.current = focusResult
@@ -64,9 +77,25 @@ export function Detail(props: {
         </label>
         <label className="field">
           <span>时间</span>
-          <MomentInput type="time" value={todo.time} onCommit={(time) => onChange({ time })} />
+          <MomentInput
+            type="time"
+            value={todo.time}
+            onCommit={changeTime}
+          />
         </label>
       </div>
+      {todo.time && todo.time < '23:59' && (
+        <label className="field">
+          <span>结束时间</span>
+          <MomentInput
+            type="time"
+            value={todo.endTime}
+            min={toTime(toMinutes(todo.time) + 1)}
+            hint="结束时间要晚于开始时间，离开后将恢复原值"
+            onCommit={(endTime) => onChange({ endTime })}
+          />
+        </label>
+      )}
       <div className="clear">
         {todo.date && (
           <button className="plain" onClick={() => void onChange({ date: null })}>
@@ -76,6 +105,11 @@ export function Detail(props: {
         {todo.time && (
           <button className="plain" onClick={() => void onChange({ time: null })}>
             清空时间
+          </button>
+        )}
+        {todo.endTime && (
+          <button className="plain" onClick={() => void onChange({ endTime: null })}>
+            清空结束时间
           </button>
         )}
       </div>
@@ -147,24 +181,32 @@ export function Detail(props: {
 function MomentInput(props: {
   type: 'date' | 'time'
   value: string | null
+  min?: string
+  /** 内容超出范围时的说明 */
+  hint?: string
   onCommit: (value: string) => Promise<boolean>
 }) {
+  const [bad, setBad] = useState(false)
   const ref = useRef<HTMLInputElement>(null)
   const stored = props.value ?? ''
   useEffect(() => {
     if (ref.current && document.activeElement !== ref.current) ref.current.value = stored
   }, [stored])
   return (
+    <>
     <input
       ref={ref}
       type={props.type}
-      min={props.type === 'date' ? '2000-01-01' : undefined}
+      min={props.type === 'date' ? '2000-01-01' : props.min}
       max={props.type === 'date' ? '9999-12-31' : undefined}
       defaultValue={stored}
       onChange={(e) => {
-        if (e.target.value && e.target.validity.valid) void props.onCommit(e.target.value)
+        const valid = e.target.value !== '' && e.target.validity.valid
+        setBad(e.target.value !== '' && !valid)
+        if (valid) void props.onCommit(e.target.value)
       }}
       onBlur={(e) => {
+        setBad(false)
         if (!e.target.value || !e.target.validity.valid) {
           // 仅重设 value 无法清除不完整的输入，先置空再还原
           e.target.value = ''
@@ -172,5 +214,7 @@ function MomentInput(props: {
         }
       }}
     />
+    {bad && props.hint && <em>{props.hint}</em>}
+    </>
   )
 }

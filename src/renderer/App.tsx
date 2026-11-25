@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Todo } from '../shared/types'
 import { buildViews } from '../shared/views'
+import { Calendar } from './Calendar'
 import { Client, type Notice } from './client'
 import { Detail } from './Detail'
 import { formatDay } from './format'
@@ -8,11 +9,12 @@ import { QuickAdd } from './QuickAdd'
 import { TodoList } from './TodoList'
 import { TrashView } from './TrashView'
 
-type View = 'today' | 'future' | 'done' | 'log' | 'trash'
+type View = 'today' | 'future' | 'calendar' | 'done' | 'log' | 'trash'
 
 const NAV: [View, string][] = [
   ['today', '今天'],
   ['future', '未来'],
+  ['calendar', '日历'],
   ['done', '已完成'],
   ['log', '工作日志'],
   ['trash', '回收站']
@@ -195,7 +197,18 @@ export function App() {
           />
         )}
 
-        <div className="scroll">
+        {view === 'calendar' && (
+          <Calendar
+            todos={state.todos}
+            today={state.today}
+            now={state.now}
+            selectedId={selectedId}
+            onSelect={select}
+            onUpdate={(id, patch) => void client.update(id, patch)}
+            onAdd={(title, d) => client.add(title, d.day, d.time, d.endTime)}
+          />
+        )}
+        <div className="scroll" hidden={view === 'calendar'}>
           {view === 'today' && (
             <>
               {views.overdue.length > 0 && (

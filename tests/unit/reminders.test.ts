@@ -258,7 +258,7 @@ describe('数据升级', () => {
     add('等待', { time: '10:00', remind: 30 })
     store.close()
     const db = new DatabaseSync(path)
-    db.exec('DROP TABLE reminded; PRAGMA user_version = 3;')
+    db.exec('DROP TABLE reminded; ALTER TABLE todos DROP COLUMN end_time; PRAGMA user_version = 3;')
     db.close()
     store = new TodoStore(path, () => now)
     const id = store.state().todos.find((t) => t.title === '弹过')!.id

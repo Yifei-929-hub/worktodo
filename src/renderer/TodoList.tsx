@@ -151,6 +151,7 @@ export function TodoList(props: {
                 <span className="when">
                   {props.showDate && t.date ? formatDay(t.date, props.today) + ' ' : ''}
                   {t.time ?? ''}
+                  {t.endTime ? `–${t.endTime}` : ''}
                 </span>
               </li>
             )

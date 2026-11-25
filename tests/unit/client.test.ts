@@ -3,7 +3,7 @@ import { Client, type Notice } from '../../src/renderer/client'
 import type { Api, AppState, Todo } from '../../src/shared/types'
 
 const todo = (id: string, sort: number): Todo => ({
-  id, title: id, date: null, time: null, detail: '', result: '', priority: 0, remind: 0, sort,
+  id, title: id, date: null, time: null, endTime: null, detail: '', result: '', priority: 0, remind: 0, sort,
   createdAt: 0, doneAt: null, deletedAt: null
 })
 const base = (patch: Partial<Todo> = {}): AppState => ({
@@ -114,7 +114,7 @@ describe('P10 写入失败', () => {
 })
 describe('P12 未保存的时间不恢复已清空的日期', () => {
   const start = { date: '2030-03-12', time: '09:00' }
-  const cleared = { date: null, time: null }
+  const cleared = { date: null, time: null, endTime: null }
   beforeEach(() => client.receive(base(start)))
 
   it('改时间失败后清空日期，发送和显示的都是无日期无时间', async () => {
@@ -153,6 +153,24 @@ describe('P12 未保存的时间不恢复已清空的日期', () => {
     calls[0].reject(locked())
     await first
     void client.update('a', { time: '11:00' })
-    expect(calls[1].args).toEqual(['a', { date: '2030-03-10', time: '11:00' }])
+    expect(calls[1].args).toEqual(['a', { date: '2030-03-10', time: '11:00', endTime: null }])
+  })
+})
+describe('结束时间', () => {
+  beforeEach(() => client.receive(base({ date: '2030-03-12', time: '09:00', endTime: '10:30' })))
+
+  it('改开始时间保持时长，发送最终结果', () => {
+    void client.update('a', { time: '14:00' })
+    expect(calls[0].args).toEqual(['a', { date: '2030-03-12', time: '14:00', endTime: '15:30' }])
+    expect(client.find('a')).toMatchObject({ time: '14:00', endTime: '15:30' })
+  })
+  it('改开始失败后清空时间，结束时间一并清空，重试不恢复', async () => {
+    void client.update('a', { time: '14:00' })
+    void client.update('a', { time: null })
+    calls.forEach((c) => c.reject(locked()))
+    await new Promise((r) => setTimeout(r))
+    expect(client.find('a')).toMatchObject({ date: '2030-03-12', time: null, endTime: null })
+    client.retryUnsaved()
+    expect(calls[2].args).toEqual(['a', { date: '2030-03-12', time: null, endTime: null }])
   })
 })

@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
-import { applyPatch, reorderSlots } from '../shared/rules'
+import { applyPatch, isEndValid, reorderSlots } from '../shared/rules'
 import { remindTimes } from '../shared/reminders'
 import type { Priority, Remind, Todo, TodoPatch, TodoState } from '../shared/types'
 import { dayKey, isValidDate, isValidTime, TRASH_MS } from '../shared/views'
 
-const SCHEMA_VERSION = 4
+const SCHEMA_VERSION = 5
 
 /** 操作本身无效，重试也不会成功；名称会随错误传到界面。 */
 export class InputError extends Error {
@@ -24,6 +24,7 @@ const toTodo = (r: Row): Todo => ({
   title: r.title as string,
   date: r.date as string | null,
   time: r.time as string | null,
+  endTime: r.end_time as string | null,
   detail: r.detail as string,
   result: r.result as string,
   priority: r.priority as Priority,
@@ -55,6 +56,10 @@ function cleanTime(value: unknown): string | null {
   if (value === null || value === '') return null
   if (typeof value !== 'string' || !isValidTime(value)) throw new InputError('时间无效')
   return value
+}
+
+function checkEnd(t: Pick<Todo, 'time' | 'endTime'>): void {
+  if (!isEndValid(t)) throw new InputError('结束时间必须晚于开始时间')
 }
 
 function cleanPriority(value: unknown): Priority {
@@ -96,14 +101,25 @@ export class TodoStore {
     return { now, today: dayKey(now), todos: rows.map(toTodo) }
   }
 
-  add(title: string, date: string | null): string {
+  add(title: string, date: string | null, time: string | null = null, endTime: string | null = null): string {
     const id = randomUUID()
-    this.db
-      .prepare(
-        `INSERT INTO todos (id, title, date, sort, created_at)
-         VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort), 0) + 1 FROM todos), ?)`
-      )
-      .run(id, cleanTitle(title), cleanDate(date), this.now())
+    const row = {
+      title: cleanTitle(title),
+      date: cleanDate(date),
+      time: cleanTime(time),
+      endTime: cleanTime(endTime)
+    }
+    if (row.time && !row.date) throw new InputError('日期无效')
+    checkEnd(row)
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO todos (id, title, date, time, end_time, sort, created_at)
+           VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort), 0) + 1 FROM todos), ?)`
+        )
+        .run(id, row.title, row.date, row.time, row.endTime, this.now())
+      this.settleReminder(this.find(id))
+    })
     return id
   }
 
@@ -117,15 +133,17 @@ export class TodoStore {
     if (patch.priority !== undefined) clean.priority = cleanPriority(patch.priority)
     if (patch.date !== undefined) clean.date = cleanDate(patch.date)
     if (patch.time !== undefined) clean.time = cleanTime(patch.time)
+    if (patch.endTime !== undefined) clean.endTime = cleanTime(patch.endTime)
     if (patch.remind !== undefined) clean.remind = cleanRemind(patch.remind)
     const n = applyPatch(t, clean, dayKey(this.now()))
+    checkEnd(n)
     this.transaction(() => {
       this.db
         .prepare(
-          `UPDATE todos SET title = ?, date = ?, time = ?, detail = ?, result = ?, priority = ?,
+          `UPDATE todos SET title = ?, date = ?, time = ?, end_time = ?, detail = ?, result = ?, priority = ?,
            remind = ? WHERE id = ?`
         )
-        .run(n.title, n.date, n.time, n.detail, n.result, n.priority, n.remind, id)
+        .run(n.title, n.date, n.time, n.endTime, n.detail, n.result, n.priority, n.remind, id)
       const [before, after] = [remindTimes(t), remindTimes(n)]
       if (before?.at !== after?.at || before?.start !== after?.start) this.settleReminder(n)
     })
@@ -334,6 +352,11 @@ export class TodoStore {
           const times = remindTimes(toTodo(r))
           if (times && times.at === r.reminded_at) insert.run(r.id, times.at, times.start)
         }
+      })
+    }
+    if (version < 5) {
+      this.transaction(() => {
+        this.db.exec('ALTER TABLE todos ADD COLUMN end_time TEXT; PRAGMA user_version = 5;')
       })
     }
   }

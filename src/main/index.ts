@@ -305,7 +305,11 @@ function registerIpc(): void {
     })
   }
   handle('state:get', () => {}, false)
-  handle('todo:add', (title: string, date: string | null) => void store.add(title, date))
+  handle(
+    'todo:add',
+    (title: string, date: string | null, time?: string | null, endTime?: string | null) =>
+      void store.add(title, date, time ?? null, endTime ?? null)
+  )
   handle('todo:update', (id: string, patch: TodoPatch) => store.update(id, patch))
   handle('todo:done', (id: string, done: boolean) => store.setDone(id, done))
   handle('todo:reorder', (ids: string[]) => store.reorder(ids))
