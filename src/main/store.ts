@@ -5,7 +5,7 @@ import { remindTimes } from '../shared/reminders'
 import type { Priority, Remind, Todo, TodoPatch, TodoState } from '../shared/types'
 import { dayKey, isValidDate, isValidTime, TRASH_MS } from '../shared/views'
 
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 4
 
 /** 操作本身无效，重试也不会成功；名称会随错误传到界面。 */
 export class InputError extends Error {
@@ -201,7 +201,13 @@ export class TodoStore {
       return []
     })
     if (due.length > 0) {
-      this.transaction(() => due.forEach(({ todo }) => this.markReminded(todo.id, remindTimes(todo)!.at, null)))
+      this.transaction(() => due.forEach(({ todo }) => {
+        const { at, start } = remindTimes(todo)!
+        this.markReminded(todo.id, at, null)
+        this.db
+          .prepare('INSERT OR IGNORE INTO reminded (todo_id, at, start) VALUES (?, ?, ?)')
+          .run(todo.id, at, start)
+      }))
     }
     return due.sort((a, b) => a.at - b.at)
   }
@@ -225,17 +231,17 @@ export class TodoStore {
     const times = remindTimes(t)
     const now = this.now()
     if (!times || times.at > now) {
-      // 等待到点的提醒还没有弹过，撤销时一并去掉“已提醒”标记
-      this.db
-        .prepare('UPDATE todos SET reminded_at = NULL, fallback_at = NULL WHERE id = ? AND fallback_at IS NOT NULL')
-        .run(t.id)
+      this.db.prepare('UPDATE todos SET fallback_at = NULL WHERE id = ?').run(t.id)
       return
     }
-    const row = this.db.prepare('SELECT reminded_at, fallback_at FROM todos WHERE id = ?').get(t.id) as Row
-    const shown = row.reminded_at === times.at && row.fallback_at === null
+    // 提醒时刻和待办时刻都相同，才是同一次提醒；中途改成别的时刻不影响已弹过的记录
+    const shown = this.db
+      .prepare('SELECT 1 FROM reminded WHERE todo_id = ? AND at = ? AND start = ?')
+      .get(t.id, times.at, times.start)
     this.markReminded(t.id, times.at, times.start > now && !shown ? times.start : null)
   }
 
+  /** 当前这次提醒已处理（弹过、跳过或改在到点）；fallback 为改在到点的时刻。 */
   private markReminded(id: string, at: number, fallback: number | null): void {
     this.db.prepare('UPDATE todos SET reminded_at = ?, fallback_at = ? WHERE id = ?').run(at, fallback, id)
   }
@@ -306,6 +312,28 @@ export class TodoStore {
     if (version < 3) {
       this.transaction(() => {
         this.db.exec('ALTER TABLE todos ADD COLUMN fallback_at INTEGER; PRAGMA user_version = 3;')
+      })
+    }
+    if (version < 4) {
+      this.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE reminded (
+            todo_id TEXT NOT NULL REFERENCES todos (id) ON DELETE CASCADE,
+            at INTEGER NOT NULL,
+            start INTEGER NOT NULL,
+            PRIMARY KEY (todo_id, at, start)
+          );
+          PRAGMA user_version = 4;
+        `)
+        // 带上已有的“已提醒”记录，升级后不重复弹
+        const rows = this.db
+          .prepare('SELECT * FROM todos WHERE reminded_at IS NOT NULL AND fallback_at IS NULL')
+          .all() as Row[]
+        const insert = this.db.prepare('INSERT INTO reminded (todo_id, at, start) VALUES (?, ?, ?)')
+        for (const r of rows) {
+          const times = remindTimes(toTodo(r))
+          if (times && times.at === r.reminded_at) insert.run(r.id, times.at, times.start)
+        }
       })
     }
   }
