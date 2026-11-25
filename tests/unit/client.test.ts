@@ -111,3 +111,47 @@ describe('P10 写入失败', () => {
     expect(notices.at(-1)).toEqual({ text: '数据文件正被其他程序占用', sticky: true })
   })
 })
+describe('P12 未保存的时间不恢复已清空的日期', () => {
+  const start = { date: '2030-03-12', time: '09:00' }
+  const cleared = { date: null, time: null }
+  beforeEach(() => client.receive(base(start)))
+
+  it('改时间失败后清空日期，发送和显示的都是无日期无时间', async () => {
+    const first = client.update('a', { time: '10:00' })
+    calls[0].reject(locked())
+    await first
+    const second = client.update('a', { date: null })
+    expect(calls[1].args).toEqual(['a', cleared])
+    expect(client.find('a')).toMatchObject(cleared)
+    calls[1].resolve(base(cleared))
+    await second
+    expect(client.find('a')).toMatchObject(cleared)
+    expect(client.hasUnsaved()).toBe(false)
+  })
+  it('清空日期发出后，较早的改时间才失败，也不恢复', async () => {
+    const first = client.update('a', { time: '10:00' })
+    const second = client.update('a', { date: null })
+    calls[0].reject(locked())
+    await first
+    calls[1].resolve(base(cleared))
+    await second
+    expect(client.find('a')).toMatchObject(cleared)
+    expect(client.hasUnsaved()).toBe(false)
+  })
+  it('两次都失败后重试，仍为清空', async () => {
+    void client.update('a', { time: '10:00' })
+    void client.update('a', { date: null })
+    calls.forEach((c) => c.reject(locked()))
+    await new Promise((r) => setTimeout(r))
+    expect(client.find('a')).toMatchObject(cleared)
+    client.retryUnsaved()
+    expect(calls[2].args).toEqual(['a', cleared])
+  })
+  it('清空失败后再填时间，日期取今天', async () => {
+    const first = client.update('a', { date: null })
+    calls[0].reject(locked())
+    await first
+    void client.update('a', { time: '11:00' })
+    expect(calls[1].args).toEqual(['a', { date: '2030-03-10', time: '11:00' }])
+  })
+})

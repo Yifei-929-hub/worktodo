@@ -410,6 +410,20 @@ const steps = {
       await eventually(async () => assert.equal(saved(), expected), '库中文字不符')
       db.close()
     }
+    // P12 改时间失败后清空日期，不会变成今天
+    await detail().locator('input[type=date]').fill(plusDays(2))
+    await detail().locator('input[type=time]').fill('09:00')
+    await detail().getByRole('button', { name: '清空时间' }).waitFor()
+    const unlockTime = lock()
+    await detail().locator('input[type=time]').fill('10:00')
+    await unsaved.waitFor()
+    await detail().getByRole('button', { name: '清空日期' }).click()
+    unlockTime()
+    await unsaved.waitFor({ state: 'detached' })
+    const check = new DatabaseSync(join(dir, 'user-data', 'data', 'worktodo.db'))
+    const moment = check.prepare("SELECT date, time FROM todos WHERE title = '占用测试'").get()
+    assert.deepEqual({ ...moment }, { date: null, time: null })
+    check.close()
     // 输入条保存失败：文字保留；勾选失败：收起输入条并持续提示
     await page.locator('.detail').getByRole('button', { name: '关闭' }).click()
     let unlock = lock()

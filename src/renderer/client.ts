@@ -84,7 +84,7 @@ export class Client {
 
   /** 连同该项之前未能保存的字段一起保存。 */
   async update(id: string, patch: TodoPatch): Promise<boolean> {
-    const full: TodoPatch = { ...this.carried(id), ...patch }
+    const full = this.fullPatch(id, patch)
     const seq = ++this.seq
     const fields = Object.entries(full) as [Field, unknown][]
     return this.run(
@@ -175,14 +175,22 @@ export class Client {
     }
   }
 
-  /** 未保存的字段取当前显示的值：其中可能有更新的输入正在保存，不能用旧值覆盖它。 */
-  private carried(id: string): TodoPatch {
+  /**
+   * 本次修改加上未保存的字段，都取修改后应显示的值：
+   * 未保存的字段可能有更新的输入正在保存，不能用旧值覆盖；
+   * 日期和时间互相影响，涉及其一就一并发送最终结果，不让旧时间恢复已清空的日期。
+   */
+  private fullPatch(id: string, patch: TodoPatch): TodoPatch {
     const todo = this.find(id)
-    if (!todo) return {}
-    const fields = [...(this.unsaved.get(id)?.keys() ?? [])].map((field) => [field, todo[field]])
-    return Object.fromEntries(fields) as TodoPatch
+    if (!todo || !this.snapshot) return patch
+    const target = applyPatch(todo, patch, this.snapshot.today)
+    const fields = new Set<Field>([
+      ...(this.unsaved.get(id)?.keys() ?? []),
+      ...(Object.keys(patch) as Field[])
+    ])
+    if (fields.has('date') || fields.has('time')) fields.add('date').add('time')
+    return Object.fromEntries([...fields].map((field) => [field, target[field]])) as TodoPatch
   }
-
   private unsavedPatch(id: string): TodoPatch {
     const fields = [...(this.unsaved.get(id) ?? [])].map(([field, { value }]) => [field, value])
     return Object.fromEntries(fields) as TodoPatch
