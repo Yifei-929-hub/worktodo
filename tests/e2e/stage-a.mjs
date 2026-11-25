@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { DatabaseSync } from 'node:sqlite'
 import { _electron } from 'playwright-core'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -154,10 +155,31 @@ const steps = {
   },
   'A5 有时间的在前，拖动和键盘排序持久化，优先级不影响': async () => {
     await nav('今天')
+    // 记录鼠标与拖放事件，仅在失败时输出，用于查明偶发的拖动失败
+    await page.evaluate(() => {
+      window.dragLog = []
+      const names = ['mousemove', 'mousedown', 'mouseup', 'dragstart', 'dragover', 'dragleave', 'drop', 'dragend', 'blur']
+      for (const n of names) {
+        window.addEventListener(n, (e) => {
+          const li = e.target.closest?.('li')?.dataset.todo ?? e.target.tagName ?? 'window'
+          const entry = `${Math.round(performance.now())} ${n} ${li} (${e.clientX},${e.clientY}) buttons=${e.buttons} trusted=${e.isTrusted}`
+          const at = window.dragLog.push(entry) - 1
+          setTimeout(() => (window.dragLog[at] += ` prevented=${e.defaultPrevented} effect=${e.dataTransfer?.dropEffect}`))
+        }, true)
+      }
+    })
     for (const t of ['甲', '乙', '丙']) await add(t)
     await expectTitles('今天', ['整理项目资料', '甲', '乙', '丙'])
     await row('丙').dragTo(row('甲'))
-    await expectTitles('今天', ['整理项目资料', '丙', '甲', '乙'])
+    try {
+      await expectTitles('今天', ['整理项目资料', '丙', '甲', '乙'])
+    } catch (e) {
+      const boxes = await page.locator('li').evaluateAll((l) =>
+        l.map((x) => `${x.dataset.todo} draggable=${x.draggable} y=${x.getBoundingClientRect().y}`)
+      )
+      console.log('拖动事件：\n' + (await page.evaluate(() => window.dragLog)).slice(-40).join('\n'), boxes)
+      throw e
+    }
     await row('乙').locator('.row-main').focus()
     await page.keyboard.press('Alt+ArrowUp')
     await expectTitles('今天', ['整理项目资料', '丙', '乙', '甲'])
@@ -355,6 +377,64 @@ const steps = {
     await launch()
     await nav('回收站')
     assert.equal(await page.locator('li').count(), 0)
+  },
+  'P10 数据库被占用时不丢文字，失败有提示': async () => {
+    const lock = () => {
+      const db = new DatabaseSync(join(dir, 'user-data', 'data', 'worktodo.db'))
+      db.exec('BEGIN IMMEDIATE')
+      return () => {
+        db.exec('ROLLBACK')
+        db.close()
+      }
+    }
+    const unsaved = page.getByText('有修改尚未保存')
+    const result = detail().getByLabel('完成情况')
+    await nav('今天')
+    await add('占用测试')
+    await add('占用勾选')
+    await select('占用测试')
+    await result.focus()
+    for (const [hold, text] of [[400, 'abcdefghij'], [2500, 'klmnopqrst']]) {
+      const unlock = lock()
+      setTimeout(unlock, hold)
+      // 提示可能在输完之前就因重试成功而消失，因此边输入边观察
+      const seen = hold > 1000 ? unsaved.waitFor() : undefined
+      await page.keyboard.type(text, { delay: 80 })
+      await seen
+      const expected = text[0] === 'a' ? 'abcdefghij' : 'abcdefghijklmnopqrst'
+      assert.equal(await result.inputValue(), expected)
+      await unsaved.waitFor({ state: 'detached', timeout: 15000 }) // 自动重试成功
+      assert.equal(await result.inputValue(), expected)
+      const db = new DatabaseSync(join(dir, 'user-data', 'data', 'worktodo.db'))
+      const saved = () => db.prepare("SELECT result FROM todos WHERE title = '占用测试'").get().result
+      await eventually(async () => assert.equal(saved(), expected), '库中文字不符')
+      db.close()
+    }
+    // 输入条保存失败：文字保留；勾选失败：收起输入条并持续提示
+    await page.locator('.detail').getByRole('button', { name: '关闭' }).click()
+    let unlock = lock()
+    await row('占用勾选').getByRole('checkbox').click()
+    await page.getByRole('alert').getByText('占用').waitFor()
+    assert.equal(await page.locator('.result-bar').count(), 0)
+    assert.equal(await row('占用勾选').getByRole('checkbox').isChecked(), false)
+    unlock()
+    await add('后续成功')
+    assert.equal(await page.getByRole('alert').count(), 1)
+    await page.getByRole('button', { name: '知道了' }).click()
+    await page.waitForTimeout(400)
+    await row('占用勾选').getByRole('checkbox').click()
+    await page.getByPlaceholder('选填，写日志时会用到').fill('条上的文字')
+    unlock = lock()
+    await page.locator('.result-bar').getByRole('button', { name: '保存' }).click()
+    await unsaved.waitFor()
+    await shot('unsaved')
+    unlock()
+    await page.getByRole('button', { name: '立即保存' }).click()
+    await unsaved.waitFor({ state: 'detached' })
+    const db = new DatabaseSync(join(dir, 'user-data', 'data', 'worktodo.db'))
+    assert.equal(db.prepare("SELECT result FROM todos WHERE title = '占用勾选'").get().result, '条上的文字')
+    db.close()
+    assert.equal(existsSync(crashFile), false)
   },
   '界面隔离：无 Node 能力，无外部请求，无报错': async () => {
     assert.deepEqual(await page.evaluate(() => [typeof window.require, typeof window.process]), [

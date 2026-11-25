@@ -53,7 +53,12 @@ function startTicker(): void {
   let day = dayKey(clock())
   ticker = setInterval(() => {
     const today = dayKey(clock())
-    const purged = store.purgeExpired()
+    let purged = 0
+    try {
+      purged = store.purgeExpired()
+    } catch (e) {
+      console.warn('清理回收站失败，下一秒重试', e)
+    }
     if (today !== day || purged > 0) {
       day = today
       broadcast()
@@ -120,7 +125,11 @@ if (!app.requestSingleInstanceLock()) {
       const dev = devUrl !== undefined && new URL(details.url).host === new URL(devUrl).host
       callback({ cancel: !local && !dev })
     })
-    store.purgeExpired()
+    try {
+      store.purgeExpired()
+    } catch (e) {
+      console.warn('启动时清理回收站失败，稍后重试', e)
+    }
     registerIpc()
     startTicker()
     createWindow()

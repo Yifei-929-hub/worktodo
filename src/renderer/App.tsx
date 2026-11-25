@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Todo } from '../shared/types'
 import { buildViews } from '../shared/views'
-import { Client } from './client'
+import { Client, type Notice } from './client'
 import { Detail } from './Detail'
 import { formatDay } from './format'
 import { TodoList } from './TodoList'
@@ -24,8 +24,12 @@ interface Bar {
 }
 
 export function App() {
-  const [error, setError] = useState('')
-  const [client] = useState(() => new Client(window.worktodo, setError))
+  const [notice, setNotice] = useState<Notice | null>(null)
+  // 成功的操作只清掉普通提示，不清掉需要用户看到的失败提示
+  const [client] = useState(
+    () => new Client(window.worktodo, (n) => setNotice((old) => n ?? (old?.sticky ? old : null)))
+  )
+  const error = notice?.text ?? ''
   const state = useSyncExternalStore(client.subscribe, client.getSnapshot)
   const [view, setView] = useState<View>('today')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -48,10 +52,14 @@ export function App() {
   useEffect(() => {
     void client.load()
     const off = window.worktodo.onState(client.receive)
-    window.addEventListener('beforeunload', commitBar)
+    const onClose = (): void => {
+      commitBar()
+      client.retryUnsaved()
+    }
+    window.addEventListener('beforeunload', onClose)
     return () => {
       off()
-      window.removeEventListener('beforeunload', commitBar)
+      window.removeEventListener('beforeunload', onClose)
     }
   }, [client, commitBar])
 
@@ -79,7 +87,10 @@ export function App() {
     if (!todo) return
     const done = todo.doneAt === null
     commitBar()
-    void client.setDone(id, done)
+    void client.setDone(id, done).then((ok) => {
+      // 勾选失败时收起输入条，已写的文字仍保存
+      if (!ok && barRef.current?.id === id) commitBar()
+    })
     if (!done) return
     if (id === selected?.id) setFocusResult((n) => n + 1)
     else setBar({ id, draft: null })
@@ -191,10 +202,16 @@ export function App() {
             onSkip={() => setBar(null)}
           />
         )}
+        {client.hasUnsaved() && (
+          <div className="error" role="status">
+            <span>有修改尚未保存，文字已保留，正在自动重试。</span>
+            <button onClick={client.retryUnsaved}>立即保存</button>
+          </div>
+        )}
         {error && (
           <div className="error" role="alert">
             <span>{error}</span>
-            <button onClick={() => setError('')}>知道了</button>
+            <button onClick={() => setNotice(null)}>知道了</button>
           </div>
         )}
       </main>

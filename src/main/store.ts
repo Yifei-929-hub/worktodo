@@ -6,6 +6,14 @@ import { dayKey, isValidDate, isValidTime, TRASH_MS } from '../shared/views'
 
 const SCHEMA_VERSION = 1
 
+/** 操作本身无效，重试也不会成功；名称会随错误传到界面。 */
+export class InputError extends Error {
+  override name = 'InputError'
+}
+
+/** 数据库被其他程序占用时，每次写入最多等待的毫秒数。等待会阻塞输入，因此很短；失败由界面保留并重试。 */
+const BUSY_TIMEOUT = 200
+
 export type Clock = () => number
 
 type Row = Record<string, string | number | null>
@@ -26,29 +34,29 @@ const toTodo = (r: Row): Todo => ({
 
 function cleanTitle(value: unknown): string {
   const title = typeof value === 'string' ? value.trim() : ''
-  if (!title) throw new Error('标题不能为空')
+  if (!title) throw new InputError('标题不能为空')
   return title
 }
 
 function cleanText(value: unknown): string {
-  if (typeof value !== 'string') throw new Error('文字内容无效')
+  if (typeof value !== 'string') throw new InputError('文字内容无效')
   return value
 }
 
 function cleanDate(value: unknown): string | null {
   if (value === null || value === '') return null
-  if (typeof value !== 'string' || !isValidDate(value)) throw new Error('日期无效')
+  if (typeof value !== 'string' || !isValidDate(value)) throw new InputError('日期无效')
   return value
 }
 
 function cleanTime(value: unknown): string | null {
   if (value === null || value === '') return null
-  if (typeof value !== 'string' || !isValidTime(value)) throw new Error('时间无效')
+  if (typeof value !== 'string' || !isValidTime(value)) throw new InputError('时间无效')
   return value
 }
 
 function cleanPriority(value: unknown): Priority {
-  if (value !== 0 && value !== 1 && value !== 2 && value !== 3) throw new Error('优先级无效')
+  if (value !== 0 && value !== 1 && value !== 2 && value !== 3) throw new InputError('优先级无效')
   return value
 }
 
@@ -59,7 +67,7 @@ export class TodoStore {
     path: string,
     private readonly now: Clock = Date.now
   ) {
-    this.db = new DatabaseSync(path)
+    this.db = new DatabaseSync(path, { timeout: BUSY_TIMEOUT })
     try {
       this.db.exec('PRAGMA journal_mode = WAL')
       this.migrate()
@@ -116,7 +124,7 @@ export class TodoStore {
 
   /** 在给定待办之间重新分配它们原有的排序值，不影响其他待办。 */
   reorder(ids: string[]): void {
-    if (!Array.isArray(ids) || new Set(ids).size !== ids.length) throw new Error('排序数据无效')
+    if (!Array.isArray(ids) || new Set(ids).size !== ids.length) throw new InputError('排序数据无效')
     const slots = reorderSlots(ids.map((id) => this.live(id)), ids)
     this.transaction(() => {
       const stmt = this.db.prepare('UPDATE todos SET sort = ? WHERE id = ?')
@@ -141,27 +149,33 @@ export class TodoStore {
 
   /** 清除在回收站中满 24 小时的待办，返回清除数量。 */
   purgeExpired(): number {
+    const before = this.now() - TRASH_MS
+    // 没有到期项时只读不写，避免每秒争用写锁
+    const due = this.db
+      .prepare('SELECT 1 FROM todos WHERE deleted_at IS NOT NULL AND deleted_at <= ? LIMIT 1')
+      .get(before)
+    if (!due) return 0
     const result = this.db
       .prepare('DELETE FROM todos WHERE deleted_at IS NOT NULL AND deleted_at <= ?')
-      .run(this.now() - TRASH_MS)
+      .run(before)
     return Number(result.changes)
   }
 
   private find(id: string): Todo {
     const row = typeof id === 'string' ? this.db.prepare('SELECT * FROM todos WHERE id = ?').get(id) : undefined
-    if (!row) throw new Error('待办不存在')
+    if (!row) throw new InputError('待办不存在')
     return toTodo(row as Row)
   }
 
   private live(id: string): Todo {
     const t = this.find(id)
-    if (t.deletedAt !== null) throw new Error('待办已在回收站中')
+    if (t.deletedAt !== null) throw new InputError('待办已在回收站中')
     return t
   }
 
   private trashed(id: string): Todo {
     const t = this.find(id)
-    if (t.deletedAt === null) throw new Error('待办不在回收站中')
+    if (t.deletedAt === null) throw new InputError('待办不在回收站中')
     return t
   }
 
