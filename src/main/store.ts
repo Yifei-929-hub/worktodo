@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { applyPatch, reorderSlots } from '../shared/rules'
-import { remindAt } from '../shared/reminders'
+import { remindTimes } from '../shared/reminders'
 import type { Priority, Remind, Todo, TodoPatch, TodoState } from '../shared/types'
 import { dayKey, isValidDate, isValidTime, TRASH_MS } from '../shared/views'
 
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 /** 操作本身无效，重试也不会成功；名称会随错误传到界面。 */
 export class InputError extends Error {
@@ -126,7 +126,8 @@ export class TodoStore {
            remind = ? WHERE id = ?`
         )
         .run(n.title, n.date, n.time, n.detail, n.result, n.priority, n.remind, id)
-      if (remindAt(n) !== remindAt(t)) this.skipPast(n)
+      const [before, after] = [remindTimes(t), remindTimes(n)]
+      if (before?.at !== after?.at || before?.start !== after?.start) this.settleReminder(n)
     })
   }
 
@@ -135,7 +136,7 @@ export class TodoStore {
     if ((t.doneAt !== null) === done) return
     this.transaction(() => {
       this.db.prepare('UPDATE todos SET done_at = ? WHERE id = ?').run(done ? this.now() : null, id)
-      if (!done) this.skipPast(t)
+      if (!done) this.settleReminder(t)
     })
   }
 
@@ -158,7 +159,7 @@ export class TodoStore {
     const t = this.trashed(id)
     this.transaction(() => {
       this.db.prepare('UPDATE todos SET deleted_at = NULL WHERE id = ?').run(id)
-      this.skipPast(t)
+      this.settleReminder(t)
     })
   }
 
@@ -182,7 +183,7 @@ export class TodoStore {
   }
 
   /** 取出到时未提醒的待办并记为已提醒；同一时刻的提醒只会取出一次。 */
-  collectDue(): { todo: Todo; at: number }[] {
+  collectDue(): { todo: Todo; at: number; start: number }[] {
     const now = this.now()
     const rows = this.db
       .prepare(
@@ -192,11 +193,15 @@ export class TodoStore {
       .all() as Row[]
     const due = rows.flatMap((r) => {
       const todo = toTodo(r)
-      const at = remindAt(todo)
-      return at !== null && at <= now && r.reminded_at !== at ? [{ todo, at }] : []
+      const times = remindTimes(todo)
+      if (!times) return []
+      const { at, start } = times
+      if (at <= now && r.reminded_at !== at) return [{ todo, at, start }]
+      if (start <= now && r.fallback_at === start) return [{ todo, at: start, start }]
+      return []
     })
     if (due.length > 0) {
-      this.transaction(() => due.forEach(({ todo, at }) => this.markReminded(todo.id, at)))
+      this.transaction(() => due.forEach(({ todo }) => this.markReminded(todo.id, remindTimes(todo)!.at, null)))
     }
     return due.sort((a, b) => a.at - b.at)
   }
@@ -212,16 +217,28 @@ export class TodoStore {
       .run(key, value)
   }
 
-  /** 修改或恢复后提醒时刻已过的，不再补弹。 */
-  private skipPast(t: Todo): void {
-    const at = remindAt(t)
-    if (at !== null && at <= this.now()) this.markReminded(t.id, at)
+  /**
+   * 修改或恢复后重新确定提醒：提醒时刻未过的照常；已过但待办时刻未到的，改在到点提醒；
+   * 待办时刻也已过的不补弹；已经弹过的同一次提醒不再弹。
+   */
+  private settleReminder(t: Todo): void {
+    const times = remindTimes(t)
+    const now = this.now()
+    if (!times || times.at > now) {
+      // 等待到点的提醒还没有弹过，撤销时一并去掉“已提醒”标记
+      this.db
+        .prepare('UPDATE todos SET reminded_at = NULL, fallback_at = NULL WHERE id = ? AND fallback_at IS NOT NULL')
+        .run(t.id)
+      return
+    }
+    const row = this.db.prepare('SELECT reminded_at, fallback_at FROM todos WHERE id = ?').get(t.id) as Row
+    const shown = row.reminded_at === times.at && row.fallback_at === null
+    this.markReminded(t.id, times.at, times.start > now && !shown ? times.start : null)
   }
 
-  private markReminded(id: string, at: number): void {
-    this.db.prepare('UPDATE todos SET reminded_at = ? WHERE id = ?').run(at, id)
+  private markReminded(id: string, at: number, fallback: number | null): void {
+    this.db.prepare('UPDATE todos SET reminded_at = ?, fallback_at = ? WHERE id = ?').run(at, fallback, id)
   }
-
   private find(id: string): Todo {
     const row = typeof id === 'string' ? this.db.prepare('SELECT * FROM todos WHERE id = ?').get(id) : undefined
     if (!row) throw new InputError('待办不存在')
@@ -284,6 +301,11 @@ export class TodoStore {
           CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
           PRAGMA user_version = 2;
         `)
+      })
+    }
+    if (version < 3) {
+      this.transaction(() => {
+        this.db.exec('ALTER TABLE todos ADD COLUMN fallback_at INTEGER; PRAGMA user_version = 3;')
       })
     }
   }

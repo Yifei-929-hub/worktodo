@@ -253,8 +253,8 @@ function checkReminders(): boolean {
   const merged = late.length > 1 ? late : []
   for (const item of due) {
     if (merged.includes(item)) continue
-    const { todo } = item
-    const lead = todo.remind ? `（提前 ${todo.remind} 分钟提醒）` : ''
+    const { todo, at, start } = item
+    const lead = at < start ? `（提前 ${todo.remind} 分钟提醒）` : ''
     notify(todo.title, `${todo.date === dayKey(clock()) ? '今天' : todo.date} ${todo.time}${lead}`, () =>
       showMain(todo.id)
     )

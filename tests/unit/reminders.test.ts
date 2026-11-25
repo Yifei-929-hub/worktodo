@@ -122,6 +122,73 @@ describe('B4 完成、删除与修改', () => {
   })
 })
 
+describe('提醒时刻已过、待办时刻未到', () => {
+  beforeEach(() => (now = at(10, 9, 50)))
+
+  it('设置时已过提前量，改在到点提醒一次', () => {
+    add('会议', { time: '10:00', remind: 30 })
+    expect(due()).toEqual([])
+    now = at(10, 10) - 1
+    expect(due()).toEqual([])
+    now += 1
+    expect(due()).toEqual(['会议'])
+    expect(due()).toEqual([])
+  })
+  it('到点前改为不提醒、改时间或改提前量，按新值', () => {
+    const a = add('不提醒', { time: '10:00', remind: 30 })
+    const b = add('改时间', { time: '10:00', remind: 30 })
+    const c = add('改提前量', { time: '10:00', remind: 30 })
+    store.update(a, { remind: null })
+    store.update(b, { time: '11:00' })
+    store.update(c, { remind: 5 })
+    now = at(10, 9, 55)
+    expect(due()).toEqual(['改提前量'])
+    now = at(10, 10)
+    expect(due()).toEqual([])
+    now = at(10, 10, 30)
+    expect(due()).toEqual(['改时间'])
+  })
+  it('提醒时刻不变但待办时刻变了，到新时刻提醒', () => {
+    const id = add('甲', { time: '10:00', remind: 30 })
+    store.update(id, { time: '09:55', remind: null })
+    store.update(id, { time: '10:00', remind: 30 })
+    store.update(id, { title: '改名' })
+    now = at(10, 10)
+    expect(due()).toEqual(['改名'])
+  })
+  it('已提前弹过的，取消勾选或恢复后到点不重复弹', () => {
+    const id = add('甲', { time: '11:00', remind: 30 })
+    now = at(10, 10, 30)
+    expect(due()).toEqual(['甲'])
+    store.setDone(id, true)
+    store.setDone(id, false)
+    store.remove(id)
+    store.restore(id)
+    now = at(10, 11)
+    expect(due()).toEqual([])
+  })
+  it('完成期间错过提前量，取消勾选后到点提醒；过点才取消的不弹', () => {
+    const a = add('甲', { time: '11:00', remind: 30 })
+    const b = add('乙', { time: '11:00', remind: 30 })
+    store.setDone(a, true)
+    store.setDone(b, true)
+    now = at(10, 10, 45)
+    store.setDone(a, false)
+    now = at(10, 11)
+    expect(due()).toEqual(['甲'])
+    store.setDone(b, false)
+    expect(due()).toEqual([])
+  })
+  it('到点时程序未运行，重新打开后取出', () => {
+    add('会议', { time: '10:00', remind: 30 })
+    store.close()
+    now = at(10, 12)
+    store = new TodoStore(path, () => now)
+    expect(due()).toEqual(['会议'])
+    expect(due()).toEqual([])
+  })
+})
+
 describe('数据升级', () => {
   it('阶段 A 的数据升级后保留，默认到点提醒', () => {
     const old = join(dir, 'old.db')

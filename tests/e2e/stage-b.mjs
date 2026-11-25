@@ -180,6 +180,16 @@ const steps = {
     await settle()
     await expectSent([...before, '改时间的'])
   },
+  '提前量已过但待办时间未到的，改在到点提醒': async () => {
+    const before = await sentTitles()
+    await add('来不及提前')
+    await setTime('来不及提前', '11:25', '提前 30 分钟')
+    await settle()
+    await expectSent(before)
+    goTo(11, 25)
+    await expectSent([...before, '来不及提前'])
+    assert.equal((await sent()).at(-1).body, '今天 11:25')
+  },
   'B2 关闭窗口后收进托盘并继续提醒，首次有提示，点通知定位': async () => {
     await add('托盘提醒')
     await setTime('托盘提醒', '11:30')
