@@ -22,7 +22,7 @@ const env = {
 }
 delete env.ELECTRON_RUN_AS_NODE
 
-const HOUR = 56
+const HOUR = 72
 let offset = 0
 const setClock = (ms) => {
   offset = ms
@@ -214,7 +214,7 @@ const steps = {
     await drag(h, [h[0], h[1] + HOUR / 2])
     await expectSaved('点选', day(2), '10:30', '13:00')
     h = await handle('点选')
-    await drag(h, [h[0], h[1] - HOUR * 5])
+    await drag(h, [h[0], h[1] - HOUR * 3.2])
     await expectSaved('点选', day(2), '10:30', '10:45')
     await page.mouse.click(...(await at(day(3), M(10))))
     await typeDraft('无结束')
@@ -254,7 +254,7 @@ const steps = {
     await expectSaved('拖选', day(1), '22:30', '23:59')
   },
   'E4 重叠的并排且都可点，首尾相接的不并排；已完成的变淡且不可拖；红线位置': async () => {
-    await scrollTo(M(11)) // 避开可见区边缘的自动滚动
+    await scrollTo(M(12)) // 避开可见区边缘的自动滚动
     for (const [title, a, b] of [['重一', M(14), M(15)], ['重二', M(16), M(17)], ['接上', M(17), M(18)]]) {
       await drag(await at(day(4), a), await at(day(4), b))
       await typeDraft(title)
@@ -283,6 +283,109 @@ const steps = {
     const col = await page.locator(`[data-column="${TODAY}"]`).boundingBox()
     assert.ok(Math.abs(line.x - col.x) < 2 && Math.abs(line.y - col.y - 10 * HOUR) < 4, '红线位置')
     await shot('calendar-week')
+  },
+  'P19 短块和贴近午夜的块，上中下都能点开，能移动': async () => {
+    const sql = new DatabaseSync(dbFile)
+    const add = (t, time, end) =>
+      sql
+        .prepare('INSERT INTO todos (id, title, date, time, end_time, remind, sort, created_at) VALUES (?, ?, ?, ?, ?, NULL, 900, 1)')
+        .run(t, t, day(-1), time, end)
+    const list = [['五分', '11:00', '11:05'], ['十分', '12:00', '12:10'], ['十五分', '13:00', '13:15'], ['末尾', '23:50', null], ['最末', '23:59', null]]
+    list.forEach((x) => add(...x))
+    sql.close()
+    await relaunch()
+    await nav('日历')
+    await mode('周')
+    for (const [title] of list) {
+      const late = title === '末尾' || title === '最末'
+      if (late) await page.locator('.cal-scroll').evaluate((e) => (e.scrollTop = 99999))
+      else await scrollTo(M(9, 30))
+      const b = await block(title).boundingBox()
+      assert.ok(b.height >= 17, `${title} 高度 ${b.height}`)
+      for (const part of [0.15, 0.5, 0.92]) {
+        await page.mouse.click(b.x + b.width / 2, b.y + b.height * part)
+        await eventually(async () => assert.equal(await detail().getByLabel('标题').inputValue(), title), `${title} ${part} 未打开`)
+        await closeDetail()
+      }
+    }
+    const b = await block('最末').boundingBox()
+    await drag([b.x + b.width / 2, b.y + 8], [b.x + b.width / 2, b.y + 8 - HOUR])
+    await expectSaved('最末', day(-1), '22:59', null)
+    await scrollTo(M(9, 30))
+    const s = await block('五分').boundingBox()
+    await drag([s.x + s.width / 2, s.y + 8], [s.x + s.width / 2, s.y + 8 - HOUR / 2])
+    await expectSaved('五分', day(-1), '10:30', '10:35')
+    await scrollTo(M(12))
+  },
+  'P20 拖到日历外松开即取消，回到日历内可继续': async () => {
+    const b = await block('接上').boundingBox()
+    const from = [b.x + b.width / 2, b.y + 10]
+    const box = await page.locator('.cal-scroll').boundingBox()
+    const bar = await page.locator('.cal-bar').boundingBox()
+    const places = {
+      导航: [60, 400],
+      工具栏: [bar.x + 300, bar.y + 12],
+      日期栏: [from[0], box.y + 8],
+      下方: [from[0], box.y + box.height + 8],
+      窗口上方: [from[0], -60]
+    }
+    for (const [name, to] of Object.entries(places)) {
+      // 先在日历内移动并确认拖动已开始，再移到外面松开
+      await drag(from, [from[0], from[1] - HOUR], false)
+      await eventually(async () => assert.match(await block('接上').getAttribute('class'), /is-dragging/), '拖动未开始')
+      await page.mouse.move(...to, { steps: 8 })
+      await page.mouse.up()
+      await page.waitForTimeout(150)
+      assert.deepEqual(saved('接上'), { date: day(4), time: '17:00', endTime: '18:00' }, name)
+      await scrollTo(M(12))
+    }
+    const h = await center(block('接上').locator('.cal-handle'))
+    await drag(h, [h[0], h[1] - 30], false)
+    await eventually(async () => assert.match(await block('接上').getAttribute('class'), /is-dragging/), '改时长未开始')
+    await page.mouse.move(60, h[1], { steps: 8 })
+    await page.mouse.up()
+    await drag(await at(TODAY, M(13)), await at(TODAY, M(14)), false)
+    await page.locator('.cal-select').waitFor()
+    await page.mouse.move(60, 500, { steps: 8 })
+    await page.locator('.cal-select').waitFor({ state: 'detached' })
+    await page.mouse.up()
+    await page.waitForTimeout(150)
+    assert.deepEqual(saved('接上'), { date: day(4), time: '17:00', endTime: '18:00' })
+    assert.equal(await page.getByLabel('新建待办标题').count(), 0)
+    assert.equal(await detail().count(), 0)
+    await scrollTo(M(12))
+    await drag(from, [60, 400], false)
+    await page.mouse.move(from[0], from[1] - HOUR, { steps: 8 })
+    await page.mouse.up()
+    await expectSaved('接上', day(4), '16:00', '17:00')
+    await drag([from[0], from[1] - HOUR], from)
+    await expectSaved('接上', day(4), '17:00', '18:00')
+  },
+  'P22 最小窗口打开详情时，视图按钮可点，日期不竖排': async () => {
+    const resize = (w, h) =>
+      app.evaluate(
+        ({ BrowserWindow }, [a, b]) =>
+          BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().endsWith('#main')).setSize(a, b),
+        [w, h]
+      )
+    await block('接上').locator('.cal-open').click()
+    await resize(760, 520)
+    await page.waitForTimeout(400)
+    await shot('calendar-narrow')
+    for (const d of await page.locator('.cal-day').all()) {
+      const r = await d.boundingBox()
+      assert.ok(r.width >= 70 && r.height < 60, JSON.stringify(r))
+    }
+    const left = (s) => page.locator(s).evaluateAll((l) => l.map((e) => Math.round(e.getBoundingClientRect().left)))
+    assert.deepEqual(await left('.cal-day'), await left('.cal-column'))
+    assert.deepEqual(await left('.allday-cell'), await left('.cal-column'))
+    for (const m of ['月', '日', '周']) {
+      await page.locator('.cal-bar').getByRole('button', { name: m, exact: true }).click({ timeout: 3000 })
+    }
+    await closeDetail()
+    await resize(1120, 740)
+    await page.waitForTimeout(400)
+    await scrollTo(M(12))
   },
   'E6 保存失败时保留并自动重试；新建失败保留文字': async () => {
     const db = new DatabaseSync(dbFile)

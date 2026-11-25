@@ -8,6 +8,8 @@ export const DAY_MINUTES = 24 * 60
 /** 没有结束时间的显示时长 */
 export const DEFAULT_MINUTES = 30
 export const STEP = 15
+/** 显示时的最短时长，保证短的和贴近午夜的也能点到 */
+export const MIN_SHOWN = 15
 
 const toDate = (key: string): Date => {
   const [y, m, d] = key.split('-').map(Number)
@@ -65,11 +67,19 @@ export function itemsByDay(todos: Todo[], days: string[]): Map<string, DayItems>
 
 export interface Block {
   todo: Todo
+  /** 显示的起止，短的和贴近午夜的会与实际略有不同 */
   start: number
   end: number
   /** 重叠时并排：第几列、共几列 */
   column: number
   columns: number
+}
+
+/** 显示的起止：不足最短时长的补足，超过午夜的往上移。 */
+export function shownSpan(t: Todo): { start: number; end: number } {
+  const { start, end } = span(t)
+  const top = Math.min(start, DAY_MINUTES - MIN_SHOWN)
+  return { start: top, end: Math.max(end, top + MIN_SHOWN) }
 }
 
 export function span(t: Todo): { start: number; end: number } {
@@ -81,7 +91,7 @@ export function span(t: Todo): { start: number; end: number } {
 /** 计算一天内各项的位置；首尾相接的不算重叠。 */
 export function layoutDay(timed: Todo[]): Block[] {
   const blocks: Block[] = timed
-    .map((todo) => ({ todo, ...span(todo), column: 0, columns: 1 }))
+    .map((todo) => ({ todo, ...shownSpan(todo), column: 0, columns: 1 }))
     .sort((a, b) => a.start - b.start || b.end - a.end || a.todo.sort - b.todo.sort)
   let cluster: Block[] = []
   let columnEnds: number[] = []

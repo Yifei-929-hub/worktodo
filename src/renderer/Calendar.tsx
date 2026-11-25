@@ -4,6 +4,7 @@ import {
   layoutDay,
   monthDays,
   page,
+  shownSpan,
   span,
   STEP,
   weekDays,
@@ -15,7 +16,7 @@ import { dayKey } from '../shared/views'
 import { formatDay } from './format'
 
 /** 每小时的高度（像素） */
-const HOUR = 56
+const HOUR = 72
 const MONTH_MAX = 3
 const MOVE_THRESHOLD = 4
 const MODES: [CalendarMode, string][] = [
@@ -51,10 +52,13 @@ interface Draft {
   endTime: string | null
 }
 
-type Gesture =
-  | { kind: 'create'; from: Spot; to: Spot; moved: boolean }
-  | { kind: 'move'; todo: Todo; grab: Spot; patch: TodoPatch | null; moved: boolean }
-  | { kind: 'resize'; todo: Todo; endTime: string | null; moved: boolean }
+/** outside：鼠标在日历外，此时松开即取消 */
+type Gesture = { moved: boolean; outside: boolean } & (
+  | { kind: 'create'; from: Spot; to: Spot }
+  | { kind: 'move'; todo: Todo; grab: Spot; patch: TodoPatch | null }
+  | { kind: 'resize'; todo: Todo; endTime: string | null }
+)
+
 
 interface Props {
   todos: Todo[]
@@ -106,28 +110,36 @@ export function Calendar(props: Props) {
 
   // 拖动中显示预览后的结果
   const shown = useMemo(() => {
-    if (!gesture || gesture.kind === 'create' || !gesture.moved) return props.todos
+    if (!gesture || gesture.kind === 'create' || !gesture.moved || gesture.outside) return props.todos
     const patch = gesture.kind === 'move' ? gesture.patch : { endTime: gesture.endTime }
     return props.todos.map((t) => (t.id === gesture.todo.id && patch ? { ...t, ...patch } : t))
   }, [props.todos, gesture])
   const items = useMemo(() => itemsByDay(shown, days), [shown, days.join()])
 
-  /** 由坐标找到日期和分钟；全天区和月视图的格子优先。 */
+  /** 由坐标找到日期和分钟；全天区和月视图的格子优先。不在日历的可见区内时为 null。 */
   const locate = (x: number, y: number): Spot | null => {
-    const within = (el: Element): DOMRect | null => {
+    const area = root.current?.querySelector('.cal-scroll, .month')?.getBoundingClientRect()
+    if (!area || x < area.left || x >= area.right || y < area.top || y >= area.bottom) return null
+    for (const el of root.current!.querySelectorAll<HTMLElement>('[data-cell]')) {
       const r = el.getBoundingClientRect()
-      return x >= r.left && x < r.right ? r : null
+      if (x >= r.left && x < r.right && y >= r.top && y < r.bottom) return { day: el.dataset.cell!, minutes: null }
     }
-    for (const el of root.current?.querySelectorAll<HTMLElement>('[data-cell]') ?? []) {
-      const r = within(el)
-      if (r && y >= r.top && y < r.bottom) return { day: el.dataset.cell!, minutes: null }
+    // 顶部的日期栏盖在时间轴上，不算时间轴
+    const header = root.current!.querySelector('.cal-top')?.getBoundingClientRect()
+    if (!header || y < header.bottom) return null
+    const columns = [...root.current!.querySelectorAll<HTMLElement>('[data-column]')]
+    // 在小时标签或滚动条上时取最近的一天
+    const gap = (el: HTMLElement): number => {
+      const r = el.getBoundingClientRect()
+      return Math.max(r.left - x, x - r.right, 0)
     }
-    for (const el of root.current?.querySelectorAll<HTMLElement>('[data-column]') ?? []) {
-      const r = within(el)
-      if (r) return { day: el.dataset.column!, minutes: clamp(((y - r.top) / HOUR) * 60, 0, LAST_MINUTE) }
-    }
-    return null
+    const el = columns.reduce((best, c) => (gap(c) < gap(best) ? c : best))
+    const minutes = ((y - el.getBoundingClientRect().top) / HOUR) * 60
+    return { day: el.dataset.column!, minutes: clamp(minutes, 0, LAST_MINUTE) }
   }
+
+  const headerBottom = (): number =>
+    root.current?.querySelector('.cal-top')?.getBoundingClientRect().bottom ?? 0
 
   const begin = (e: React.PointerEvent, start: Gesture): void => {
     if (e.button !== 0 || gestureRef.current) return
@@ -139,14 +151,15 @@ export function Calendar(props: Props) {
       if (!g) return
       const moved = g.moved || Math.hypot(ev.clientX - origin.x, ev.clientY - origin.y) >= MOVE_THRESHOLD
       if (!moved) return
+      const spot = locate(ev.clientX, ev.clientY)
       const scroll = root.current?.querySelector('.cal-scroll')
-      if (scroll) {
+      if (spot && scroll) {
         const r = scroll.getBoundingClientRect()
         if (ev.clientY > r.bottom - 24) scroll.scrollTop += 12
-        else if (ev.clientY < r.top + 24 && ev.clientY > r.top) scroll.scrollTop -= 12
+        else if (spot.minutes !== null && ev.clientY < headerBottom() + 24) scroll.scrollTop -= 12
       }
-      const spot = locate(ev.clientX, ev.clientY)
-      if (spot) setGesture(advance({ ...g, moved }, spot))
+      const next = { ...g, moved, outside: spot === null }
+      setGesture(spot ? advance(next, spot) : next)
     }
     const stop = (): void => {
       window.removeEventListener('pointermove', onMove)
@@ -221,6 +234,7 @@ export function Calendar(props: Props) {
   }
 
   const finish = (g: Gesture): void => {
+    if (g.outside) return
     if (g.kind === 'create') {
       // 看得见的新建框里写了字时不替换它；翻页后看不见的，文字带到新的位置
       const visible = draft && days.includes(draft.day) && (mode !== 'month' || draft.time === null)
@@ -232,7 +246,11 @@ export function Calendar(props: Props) {
       } else setDraft({ day, ...selection(minutes, g.to.minutes ?? minutes) })
       return
     }
-    if (!g.moved) return
+    if (!g.moved) {
+      // 在改时长的边缘上只是点一下，也打开详情
+      if (g.kind === 'resize') props.onSelect(g.todo.id)
+      return
+    }
     if (g.kind === 'resize') {
       if (g.endTime && g.endTime !== g.todo.endTime) props.onUpdate(g.todo.id, { endTime: g.endTime })
     } else if (g.patch) props.onUpdate(g.todo.id, g.patch)
@@ -257,12 +275,12 @@ export function Calendar(props: Props) {
     suppressClick.current = false
     const grab = locate(e.clientX, e.clientY)
     if (todo.doneAt !== null || !grab) return
-    begin(e, { kind: 'move', todo, grab, patch: null, moved: false })
+    begin(e, { kind: 'move', todo, grab, patch: null, moved: false, outside: false })
   }
 
   const startCreate = (e: React.PointerEvent, cell: string | null): void => {
     const spot = cell ? { day: cell, minutes: null } : locate(e.clientX, e.clientY)
-    if (spot) begin(e, { kind: 'create', from: spot, to: spot, moved: false })
+    if (spot) begin(e, { kind: 'create', from: spot, to: spot, moved: false, outside: false })
   }
 
   const itemClass = (t: Todo): string =>
@@ -409,25 +427,26 @@ export function Calendar(props: Props) {
                         {b.todo.endTime ? `–${b.todo.endTime}` : ''}
                       </span>
                     </button>
-                    {b.todo.doneAt === null && (
+                    {b.todo.doneAt === null && b.start === span(b.todo).start && (
                       <span
                         className="cal-handle"
+                        style={{ height: px(b.end - b.start) < 24 ? 4 : 6 }}
                         onPointerDown={(e) => {
                           e.stopPropagation()
-                          begin(e, { kind: 'resize', todo: b.todo, endTime: b.todo.endTime, moved: false })
+                          begin(e, { kind: 'resize', todo: b.todo, endTime: b.todo.endTime, moved: false, outside: false })
                         }}
                       />
                     )}
                   </div>
                 ))}
-                {gesture?.kind === 'create' && gesture.moved && gesture.from.day === d && gesture.from.minutes !== null && (
+                {gesture?.kind === 'create' && gesture.moved && !gesture.outside && gesture.from.day === d && gesture.from.minutes !== null && (
                   <Selection {...selection(gesture.from.minutes, gesture.to.minutes ?? gesture.from.minutes)} />
                 )}
                 {draft?.day === d && draft.time && (
                   <div
                     className="cal-draft"
                     style={{
-                      top: px(toMinutes(draft.time)),
+                      top: px(shownSpan({ time: draft.time, endTime: draft.endTime } as Todo).start),
                       minHeight: px(
                         span({ time: draft.time, endTime: draft.endTime } as Todo).end - toMinutes(draft.time)
                       )
@@ -480,10 +499,14 @@ function TimeGrid(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const columns = { gridTemplateColumns: `48px repeat(${props.days.length}, minmax(0, 1fr))` }
+  // 窗口很窄时横向滚动，不把每天压得看不清
+  const columns = {
+    gridTemplateColumns: `48px repeat(${props.days.length}, minmax(0, 1fr))`,
+    minWidth: props.days.length > 1 ? 48 + props.days.length * 72 : undefined
+  }
   return (
     <div className="cal-scroll" ref={scroll}>
-      <div className="cal-top">
+      <div className="cal-top" style={{ minWidth: columns.minWidth }}>
         <div className="cal-row" style={columns}>
           <span />
           {props.days.map((d) => (
