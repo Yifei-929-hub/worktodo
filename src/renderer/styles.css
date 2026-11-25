@@ -14,7 +14,7 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--paper); }
-button, input, textarea { font: inherit; color: inherit; }
+button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 ul { list-style: none; margin: 0; padding: 0; }
 :focus-visible { outline: 2px solid var(--pine); outline-offset: 1px; }
@@ -22,7 +22,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 .app { display: flex; height: 100vh; }
 .loading { padding: 48px; }
 
-.nav { width: 176px; flex: none; padding: 20px 12px; border-right: 1px solid var(--line); }
+.nav { display: flex; flex-direction: column; width: 176px; flex: none; padding: 20px 12px; border-right: 1px solid var(--line); }
 .brand { padding: 0 10px 18px; font-size: 17px; font-weight: 700; color: var(--pine); }
 .nav-item { display: flex; justify-content: space-between; width: 100%; padding: 8px 10px; margin-bottom: 2px; border: 0; border-radius: 6px; background: none; text-align: left; }
 .nav-item:hover { background: #ecebe5; }
@@ -74,7 +74,7 @@ input[type='checkbox'] { flex: none; width: 17px; height: 17px; margin: 0; accen
 .check { display: flex; align-items: center; gap: 8px; }
 .field { display: block; min-width: 0; margin: 0 0 14px; padding: 0; border: 0; }
 .field > span, .field > legend { display: block; margin-bottom: 4px; padding: 0; font-size: 12px; color: var(--muted); }
-.field > input, .field > textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+.field > input, .field > textarea, .field > select { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
 .field textarea { resize: vertical; }
 .field em { font-size: 12px; font-style: normal; color: var(--red); }
 .pair { display: grid; grid-template-columns: 3fr 2fr; gap: 8px; }
@@ -96,3 +96,22 @@ input[type='checkbox'] { flex: none; width: 17px; height: 17px; margin: 0; accen
 dialog { max-width: 400px; padding: 20px; border: 1px solid var(--line); border-radius: 10px; color: inherit; overflow-wrap: anywhere; }
 dialog::backdrop { background: rgb(35 48 44 / 35%); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.nav-float { margin-top: auto; }
+.nav-float[aria-pressed='true'] { color: var(--pine); }
+.missed { margin-bottom: 14px; padding: 10px 14px; border: 1px solid var(--amber); border-radius: 8px; background: var(--card); }
+.missed > div, .missed li { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.missed ul { max-height: 130px; overflow-y: auto; }
+.missed li .plain { padding-left: 0; text-align: left; overflow-wrap: anywhere; }
+
+.float { display: flex; flex-direction: column; height: 100vh; padding: 8px 12px; border: 1px solid var(--line); }
+.float-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; -webkit-app-region: drag; user-select: none; }
+.float-head .sub { flex: 1; font-size: 12px; }
+.float-head button { -webkit-app-region: no-drag; }
+.icon { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; font-size: 18px; line-height: 1; }
+.float .quick { margin-bottom: 6px; }
+.float .quick input { padding: 6px 10px; }
+.float .quick button { padding: 0 12px; }
+.float .scroll { padding-bottom: 8px; }
+.float .group { margin-bottom: 8px; }
+.float .row { gap: 10px; padding: 2px 10px; }

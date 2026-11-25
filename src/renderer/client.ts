@@ -150,6 +150,18 @@ export class Client {
     )
   }
 
+  dismissMissed(): Promise<boolean> {
+    return this.run((s) => ({ ...s, missed: [] }), () => this.api.dismissMissed())
+  }
+
+  setFloatOpen(open: boolean): Promise<boolean> {
+    return this.run((s) => ({ ...s, float: { ...s.float, open } }), () => this.api.setFloatOpen(open))
+  }
+
+  setFloatPinned(pinned: boolean): Promise<boolean> {
+    return this.run((s) => ({ ...s, float: { ...s.float, pinned } }), () => this.api.setFloatPinned(pinned))
+  }
+
   private async run(
     apply: Apply,
     call: () => Promise<AppState>,

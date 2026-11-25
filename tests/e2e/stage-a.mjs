@@ -39,7 +39,7 @@ const problems = []
 const requests = []
 
 async function launch() {
-  const env = { ...process.env, WORKTODO_USER_DATA: join(dir, 'user-data'), WORKTODO_TEST_CLOCK: clockFile }
+  const env = { ...process.env, WORKTODO_USER_DATA: join(dir, 'user-data'), WORKTODO_TEST_CLOCK: clockFile, WORKTODO_TEST_NOTIFY: '1' }
   delete env.ELECTRON_RUN_AS_NODE
   app = await _electron.launch({ args: [root], env })
   // 主进程未捕获的错误默认弹窗，这里改为记录

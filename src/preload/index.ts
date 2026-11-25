@@ -10,6 +10,20 @@ const api: Api = {
   remove: (id) => ipcRenderer.invoke('todo:remove', id),
   restore: (id) => ipcRenderer.invoke('todo:restore', id),
   purge: (id) => ipcRenderer.invoke('todo:purge', id),
+  dismissMissed: () => ipcRenderer.invoke('missed:dismiss'),
+  setFloatOpen: (open) => ipcRenderer.invoke('float:open', open),
+  setFloatPinned: (pinned) => ipcRenderer.invoke('float:pin', pinned),
+  openMain: (id) => ipcRenderer.invoke('main:open', id),
+  takeFocus: () => ipcRenderer.invoke('focus:take'),
+  onFocus: (listener) => {
+    const handler = (): void => {
+      void ipcRenderer.invoke('focus:take').then((id: string | null) => {
+        if (id) listener(id)
+      })
+    }
+    ipcRenderer.on('focus', handler)
+    return () => ipcRenderer.off('focus', handler)
+  },
   onState: (listener) => {
     const handler = (_event: IpcRendererEvent, state: AppState): void => listener(state)
     ipcRenderer.on('state', handler)

@@ -3,11 +3,12 @@ import { Client, type Notice } from '../../src/renderer/client'
 import type { Api, AppState, Todo } from '../../src/shared/types'
 
 const todo = (id: string, sort: number): Todo => ({
-  id, title: id, date: null, time: null, detail: '', result: '', priority: 0, sort,
+  id, title: id, date: null, time: null, detail: '', result: '', priority: 0, remind: 0, sort,
   createdAt: 0, doneAt: null, deletedAt: null
 })
 const base = (patch: Partial<Todo> = {}): AppState => ({
-  now: 1000, today: '2030-03-10', todos: [{ ...todo('a', 1), ...patch }, todo('b', 2)]
+  now: 1000, today: '2030-03-10', todos: [{ ...todo('a', 1), ...patch }, todo('b', 2)],
+  missed: [], float: { open: false, pinned: true }
 })
 
 // 每次调用都挂起，由测试决定何时、以什么结果返回

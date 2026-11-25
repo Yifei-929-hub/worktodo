@@ -4,6 +4,7 @@ import { buildViews } from '../shared/views'
 import { Client, type Notice } from './client'
 import { Detail } from './Detail'
 import { formatDay } from './format'
+import { QuickAdd } from './QuickAdd'
 import { TodoList } from './TodoList'
 import { TrashView } from './TrashView'
 
@@ -63,6 +64,19 @@ export function App() {
     }
   }, [client, commitBar])
 
+  // 等数据加载后再定位；期间收到的定位由主进程保留
+  const locateRef = useRef<(id: string) => void>(() => {})
+  const loaded = state !== null
+  useEffect(() => {
+    if (!loaded) return
+    const go = (id: string): void => locateRef.current(id)
+    const off = window.worktodo.onFocus(go)
+    void window.worktodo.takeFocus().then((id) => {
+      if (id) go(id)
+    })
+    return off
+  }, [loaded])
+
   const views = useMemo(() => (state ? buildViews(state.todos, state.today) : null), [state])
   if (!state || !views) return <div className="loading">{error || '正在打开…'}</div>
 
@@ -75,6 +89,16 @@ export function App() {
     setView(next)
     setSelectedId(null)
   }
+
+  /** 从通知、悬浮窗或错过提醒定位到某项。 */
+  const locate = (id: string): void => {
+    const todo = client.find(id)
+    if (!todo || todo.deletedAt !== null) return
+    if (todo.doneAt !== null) setView('done')
+    else setView(todo.date !== null && todo.date <= state.today ? 'today' : 'future')
+    select(id)
+  }
+  locateRef.current = locate
 
   const select = (id: string): void => {
     // 同一项的完成情况只在一处编辑：打开详情时先保存输入条
@@ -124,6 +148,14 @@ export function App() {
             {counts[key] ? <span className="count">{counts[key]}</span> : null}
           </button>
         ))}
+        <button
+          className="nav-item nav-float"
+          aria-pressed={state.float.open}
+          onClick={() => void client.setFloatOpen(!state.float.open)}
+        >
+          <span>悬浮窗</span>
+          <span className="count">{state.float.open ? '已打开' : '未打开'}</span>
+        </button>
       </nav>
 
       <main className="main">
@@ -131,6 +163,29 @@ export function App() {
           <h1>{NAV.find(([k]) => k === view)![1]}</h1>
           {view === 'today' && <span className="sub">{formatDay(state.today, state.today)}</span>}
         </header>
+
+        {state.missed.length > 0 && (
+          <section className="missed" aria-label="错过的提醒">
+            <div>
+              <strong>程序未运行时，错过了 {state.missed.length} 项提醒</strong>
+              <button className="plain" onClick={() => void client.dismissMissed()}>
+                知道了
+              </button>
+            </div>
+            <ul>
+              {state.missed.map((m) => (
+                <li key={m.id}>
+                  <button className="plain" onClick={() => locate(m.id)}>
+                    {m.title}
+                  </button>
+                  <span className="when">
+                    {formatDay(m.date, state.today)} {m.time}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {(view === 'today' || view === 'future') && (
           <QuickAdd
@@ -228,34 +283,6 @@ export function App() {
         />
       )}
     </div>
-  )
-}
-
-function QuickAdd(props: { hint: string; onAdd: (title: string) => Promise<boolean> }) {
-  const [text, setText] = useState('')
-  return (
-    <form
-      className="quick"
-      onSubmit={(e) => {
-        e.preventDefault()
-        // 立即清空，避免重复回车添加多条；失败时还原
-        const value = text
-        if (value === '') return
-        setText('')
-        void props.onAdd(value).then((ok) => {
-          if (!ok) setText((current) => (current === '' ? value : current))
-        })
-      }}
-    >
-      <input
-        aria-label="快速添加"
-        placeholder={props.hint}
-        value={text}
-        autoFocus
-        onChange={(e) => setText(e.target.value)}
-      />
-      <button type="submit">添加</button>
-    </form>
   )
 }
 

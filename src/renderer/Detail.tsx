@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { REMIND_OPTIONS } from '../shared/reminders'
 import type { Priority, Todo, TodoPatch } from '../shared/types'
 
 const PRIORITIES: [Priority, string][] = [
@@ -78,6 +79,25 @@ export function Detail(props: {
           </button>
         )}
       </div>
+
+      {todo.time && (
+        <label className="field">
+          <span>提醒</span>
+          <select
+            value={String(todo.remind)}
+            onChange={(e) => {
+              const option = REMIND_OPTIONS.find(([value]) => String(value) === e.target.value)
+              if (option) void onChange({ remind: option[0] })
+            }}
+          >
+            {REMIND_OPTIONS.map(([value, label]) => (
+              <option key={label} value={String(value)}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <fieldset className="field">
         <legend>优先级</legend>
