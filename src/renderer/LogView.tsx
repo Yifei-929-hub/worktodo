@@ -18,14 +18,21 @@ const toRows = (items: LogItem[]): Row[] => items.map((i) => ({ ...i, key: nextK
 const drafts = new Map<string, Row[]>()
 let draftEpoch = 0
 
-export function LogView(props: { todos: Todo[]; today: string; date: string; epoch: number }) {
+/** 有未保存修改的日期 */
+export const logDraftDates = (): string[] => [...drafts.keys()].sort()
+/** 上次查看的日期，回到日志页时接着看 */
+let lastDate: string | null = null
+
+/** date：从“生成今日日志”进入时指定的日期 */
+export function LogView(props: { todos: Todo[]; today: string; date: string | null; epoch: number }) {
   const { todos, today, epoch } = props
   if (epoch !== draftEpoch) {
     // 恢复备份后，之前的编辑不再适用
     drafts.clear()
     draftEpoch = epoch
   }
-  const [date, setDate] = useState(props.date)
+  const [date, setDate] = useState(props.date ?? lastDate ?? today)
+  lastDate = date
   const [list, setList] = useState<{ date: string; savedAt: number }[]>([])
   const [saved, setSaved] = useState<SavedLog | null>(null)
   const [rows, setRowsState] = useState<Row[] | null>(null)
@@ -66,7 +73,9 @@ export function LogView(props: { todos: Todo[]; today: string; date: string; epo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date, epoch])
   useEffect(() => void load(), [load])
-  useEffect(() => setDate(props.date), [props.date])
+  useEffect(() => {
+    if (props.date) setDate(props.date)
+  }, [props.date])
   useEffect(() => {
     if (asking) dialog.current?.showModal()
     else dialog.current?.close()
@@ -224,8 +233,15 @@ export function LogView(props: { todos: Todo[]; today: string; date: string; epo
               <button className="plain" onClick={() => void copy()}>
                 复制
               </button>
-              {saved && (
-                <button className="plain" onClick={() => setRows(null)}>
+              {(saved || drafts.has(date)) && (
+                <button
+                  className="plain"
+                  onClick={() => {
+                    // 没保存过的回到默认生成的内容
+                    setRows(null)
+                    if (!saved) setRowsState(toRows(defaultItems(todos, date)))
+                  }}
+                >
                   放弃修改
                 </button>
               )}

@@ -170,6 +170,33 @@ const steps = {
     assert.ok(dates[0].includes('5日') && dates[2].includes('3日'), dates.join())
     assert.equal(await page.getByLabel('日期').getAttribute('max'), key(5))
   },
+  'P29 日志有未保存的修改时不能导出或恢复；放弃或保存后恢复可用': async () => {
+    const exportButton = () => page.getByRole('button', { name: '导出备份' })
+    await page.getByLabel('日期').fill(key(5))
+    await page.getByRole('button', { name: '修改' }).click()
+    await page.locator('.log-row').first().getByLabel('条目标题').fill('未保存的改动')
+    await nav('备份与恢复')
+    await page.getByText('工作日志有未保存的修改').waitFor()
+    assert.equal(await exportButton().isDisabled(), true)
+    assert.equal(await page.getByRole('button', { name: '从文件恢复' }).isDisabled(), true)
+    await nav('工作日志')
+    await page.getByRole('button', { name: '放弃修改' }).click()
+    await nav('备份与恢复')
+    assert.equal(await exportButton().isDisabled(), false)
+    // 没保存过的日期：改了以后也能放弃
+    await nav('工作日志')
+    await page.getByLabel('日期').fill(key(2))
+    await page.getByRole('button', { name: '临时补一条' }).click()
+    await nav('备份与恢复')
+    assert.equal(await exportButton().isDisabled(), true)
+    await page.getByText(/工作日志有未保存的修改（.*2日/).waitFor()
+    await nav('工作日志')
+    assert.equal(await page.getByLabel('日期').inputValue(), key(2)) // 回到上次看的那天
+    await page.getByRole('button', { name: '放弃修改' }).click()
+    await expectPreview(`${M}.2`)
+    await nav('备份与恢复')
+    assert.equal(await exportButton().isDisabled(), false)
+  },
   '无报错': async () => {
     await app.close()
     assert.equal(existsSync(crashFile) ? readFileSync(crashFile, 'utf8') : '', '')

@@ -7,7 +7,10 @@ import { formatDay } from './format'
 const api = window.worktodo
 
 export function BackupView(props: {
-  unsaved: boolean
+  /** 有未保存的修改时不能导出或恢复 */
+  unsaved: 'todo' | null
+  /** 有未保存修改的日志日期 */
+  logDrafts: string[]
   today: string
   onRestore: () => Promise<boolean>
 }) {
@@ -51,7 +54,7 @@ export function BackupView(props: {
     const d = new Date(ms)
     return `${formatDay(dayKey(ms), props.today)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
   }
-  const off = busy || props.unsaved
+  const off = busy || props.unsaved !== null || props.logDrafts.length > 0
 
   return (
     <div className="backup">
@@ -73,7 +76,13 @@ export function BackupView(props: {
         <button className="plain" disabled={off} onClick={() => choose(null)}>
           从文件恢复
         </button>
-        {props.unsaved && <p className="hint">有修改尚未保存，保存后才能导出或恢复。</p>}
+        {props.unsaved === 'todo' && <p className="hint">有修改尚未保存，保存后才能导出或恢复。</p>}
+        {props.logDrafts.length > 0 && (
+          <p className="hint">
+            工作日志有未保存的修改（{props.logDrafts.map((d) => formatDay(d, props.today)).join('、')}
+            ），保存或放弃修改后才能导出或恢复。
+          </p>
+        )}
         {message && <p role="status">{message}</p>}
         {failed && (
           <p className="warn" role="alert">

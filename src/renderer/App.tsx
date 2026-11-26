@@ -5,7 +5,7 @@ import { BackupView } from './BackupView'
 import { Calendar } from './Calendar'
 import { Client, type Notice } from './client'
 import { Detail } from './Detail'
-import { LogView } from './LogView'
+import { logDraftDates, LogView } from './LogView'
 import { formatDay } from './format'
 import { QuickAdd } from './QuickAdd'
 import { TodoList } from './TodoList'
@@ -157,7 +157,10 @@ export function App() {
             key={key}
             className="nav-item"
             aria-current={view === key ? 'page' : undefined}
-            onClick={() => go(key)}
+            onClick={() => {
+              setLogDate(null)
+              go(key)
+            }}
           >
             <span>{label}</span>
             {counts[key] ? <span className="count">{counts[key]}</span> : null}
@@ -274,13 +277,14 @@ export function App() {
             ))}
           {view === 'backup' && (
             <BackupView
-              unsaved={client.hasUnsaved()}
+              unsaved={client.hasUnsaved() ? 'todo' : null}
+              logDrafts={logDraftDates()}
               today={state.today}
               onRestore={() => client.restoreBackup()}
             />
           )}
           {view === 'log' && (
-            <LogView todos={state.todos} today={state.today} date={logDate ?? state.today} epoch={state.epoch} />
+            <LogView todos={state.todos} today={state.today} date={logDate} epoch={state.epoch} />
           )}
           {view === 'trash' && (
             <TrashView
