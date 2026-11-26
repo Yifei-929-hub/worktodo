@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from 'electron'
 import type { Rectangle } from 'electron'
 import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -346,6 +346,13 @@ function registerIpc(): void {
       return action(...(args as never[]))
     })
   }
+  raw('log:list', () => store.listLogs())
+  raw('log:get', (date: string) => store.getLog(date))
+  raw('log:save', (date: string, items: unknown) => store.saveLog(date, items))
+  raw('clipboard:write', (text: string) => {
+    if (typeof text !== 'string') throw new Error('内容无效')
+    clipboard.writeText(text.replace(/\r?\n/g, '\r\n'))
+  })
   raw('backup:list', () => backups.list())
   raw('backup:export', async () => {
     if (!win) return null

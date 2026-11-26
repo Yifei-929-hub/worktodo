@@ -199,7 +199,8 @@ const steps = {
       const before = files('auto-').at(-1)
       setClock(offset + 86_400_000)
       await eventually(() => assert.notEqual(files('auto-').at(-1), before), '跨天未备份')
-      assert.ok(files('auto-').length <= 7)
+      // 写入新的和删除最旧的之间短暂有 8 份，等删除完成再判断
+      await eventually(() => assert.ok(files('auto-').length <= 7), '超过 7 份')
     }
     assert.equal(files('auto-').length, 7)
     assert.equal(readdirSync(backupDir).some((f) => /part|tmp|wal|shm/.test(f)), false)

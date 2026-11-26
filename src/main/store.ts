@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { applyPatch, isEndValid, reorderSlots } from '../shared/rules'
 import { remindTimes } from '../shared/reminders'
-import type { Priority, Remind, Todo, TodoPatch, TodoState } from '../shared/types'
+import type { LogItem, Priority, Remind, SavedLog, Todo, TodoPatch, TodoState } from '../shared/types'
 import { dayKey, isValidDate, isValidTime, TRASH_MS } from '../shared/views'
 
-export const SCHEMA_VERSION = 5
+export const SCHEMA_VERSION = 6
 
 /** 操作本身无效，重试也不会成功；名称会随错误传到界面。 */
 export class InputError extends Error {
@@ -72,6 +72,22 @@ function cleanRemind(value: unknown): Remind {
     throw new InputError('提醒方式无效')
   }
   return value
+}
+
+const MAX_ITEMS = 200
+const MAX_TEXT = 5000
+
+function cleanItems(value: unknown): LogItem[] {
+  if (!Array.isArray(value) || value.length > MAX_ITEMS) throw new InputError('日志内容无效')
+  return value.map((v) => {
+    const item = v as Partial<LogItem>
+    const text = (s: unknown): string => {
+      if (typeof s !== 'string' || s.length > MAX_TEXT) throw new InputError('日志内容无效')
+      return s
+    }
+    const todoId = item.todoId === null || item.todoId === undefined ? null : text(item.todoId)
+    return { todoId, title: text(item.title), detail: text(item.detail) }
+  })
 }
 
 export class TodoStore {
@@ -250,6 +266,13 @@ export class TodoStore {
       const numbers = [t.sort, t.createdAt, t.doneAt ?? 0, t.deletedAt ?? 0]
       if (typeof t.id !== 'string' || numbers.some((n) => !Number.isFinite(n))) throw new InputError('内容无效')
     }
+    for (const { date } of this.listLogs()) {
+      try {
+        this.getLog(date)
+      } catch {
+        throw new InputError('内容无效')
+      }
+    }
   }
 
   /** 用同版本的另一份数据整体替换；失败时整体回滚。 */
@@ -257,8 +280,8 @@ export class TodoStore {
     this.db.prepare('ATTACH ? AS source').run(path)
     try {
       this.transaction(() => {
-        for (const table of ['reminded', 'todos', 'settings']) this.db.exec(`DELETE FROM main.${table}`)
-        for (const table of ['todos', 'reminded', 'settings']) {
+        for (const table of ['reminded', 'todos', 'settings', 'logs']) this.db.exec(`DELETE FROM main.${table}`)
+        for (const table of ['todos', 'reminded', 'settings', 'logs']) {
           const rows = this.db.prepare(`PRAGMA main.table_info(${table})`).all() as { name: string }[]
           const columns = rows.map((r) => r.name).join(', ')
           this.db.exec(`INSERT INTO main.${table} (${columns}) SELECT ${columns} FROM source.${table}`)
@@ -268,6 +291,36 @@ export class TodoStore {
     } finally {
       this.db.exec('DETACH source')
     }
+  }
+
+  listLogs(): { date: string; savedAt: number }[] {
+    return (this.db.prepare('SELECT date, saved_at FROM logs ORDER BY date DESC').all() as Row[]).map((r) => ({
+      date: r.date as string,
+      savedAt: r.saved_at as number
+    }))
+  }
+
+  getLog(date: string): SavedLog | null {
+    const r = this.db.prepare('SELECT * FROM logs WHERE date = ?').get(this.logDate(date)) as Row | undefined
+    if (!r) return null
+    return { date: r.date as string, items: cleanItems(JSON.parse(r.items as string)), savedAt: r.saved_at as number }
+  }
+
+  /** 保存（覆盖）某天的日志；之后待办的变化不会改动它。 */
+  saveLog(date: string, items: unknown): SavedLog {
+    const log = { date: this.logDate(date), items: cleanItems(items), savedAt: this.now() }
+    this.db
+      .prepare(
+        `INSERT INTO logs (date, items, saved_at) VALUES (?, ?, ?)
+         ON CONFLICT (date) DO UPDATE SET items = excluded.items, saved_at = excluded.saved_at`
+      )
+      .run(log.date, JSON.stringify(log.items), log.savedAt)
+    return log
+  }
+
+  private logDate(date: unknown): string {
+    if (typeof date !== 'string' || !isValidDate(date)) throw new InputError('日期无效')
+    return date
   }
 
   getSetting(key: string): string | null {
@@ -397,6 +450,14 @@ export class TodoStore {
     if (version < 5) {
       this.transaction(() => {
         this.db.exec('ALTER TABLE todos ADD COLUMN end_time TEXT; PRAGMA user_version = 5;')
+      })
+    }
+    if (version < 6) {
+      this.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE logs (date TEXT PRIMARY KEY, items TEXT NOT NULL, saved_at INTEGER NOT NULL);
+          PRAGMA user_version = 6;
+        `)
       })
     }
   }

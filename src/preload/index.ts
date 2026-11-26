@@ -30,6 +30,10 @@ const api: Api = {
   cancelRestore: () => ipcRenderer.invoke('backup:cancel'),
   confirmRestore: () => ipcRenderer.invoke('backup:restore'),
   openBackupFolder: () => ipcRenderer.invoke('backup:folder'),
+  listLogs: () => ipcRenderer.invoke('log:list'),
+  getLog: (date) => ipcRenderer.invoke('log:get', date),
+  saveLog: (date, items) => ipcRenderer.invoke('log:save', date, items),
+  copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
   onState: (listener) => {
     const handler = (_event: IpcRendererEvent, state: AppState): void => listener(state)
     ipcRenderer.on('state', handler)

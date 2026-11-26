@@ -166,3 +166,22 @@ dialog::backdrop { background: rgb(35 48 44 / 35%); }
 .backup .hint { margin: 0 0 8px; }
 .primary { padding: 7px 16px; margin-right: 8px; border: 0; border-radius: 8px; background: var(--pine); color: #fff; }
 button:disabled { opacity: 0.5; cursor: default; }
+
+.head-action { margin-left: auto; }
+.logs { display: flex; gap: 20px; align-items: flex-start; }
+.log-list { position: sticky; top: 0; flex: none; width: 160px; }
+.log-list .nav-item { padding: 5px 8px; }
+.log-main { flex: 1; min-width: 0; }
+.log-rows { margin: 0 0 10px; padding: 0; list-style: none; }
+.log-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; margin-bottom: 6px; border-radius: 8px; background: var(--card); }
+.log-row > input[type='checkbox'] { margin-top: 8px; }
+.log-row.is-off .log-fields { opacity: 0.45; }
+.log-fields { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
+.log-fields input, .log-fields textarea, .log-add select { width: 100%; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+.log-fields textarea { resize: vertical; }
+.log-actions { display: flex; flex-direction: column; }
+.log-add { display: flex; gap: 8px; margin-bottom: 14px; }
+.log-add select { flex: 1; min-width: 0; }
+.log-preview { margin: 0 0 12px; }
+.log-preview pre { margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.log-buttons { display: flex; gap: 8px; }

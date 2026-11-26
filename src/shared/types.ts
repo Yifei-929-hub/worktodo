@@ -47,6 +47,19 @@ export interface AppState extends TodoState {
   epoch: number
 }
 
+/** 日志中的一条；todoId 为空表示临时补的 */
+export interface LogItem {
+  todoId: string | null
+  title: string
+  detail: string
+}
+
+export interface SavedLog {
+  date: string
+  items: LogItem[]
+  savedAt: number
+}
+
 export interface BackupInfo {
   name: string
   kind: 'auto' | 'before-restore'
@@ -84,5 +97,10 @@ export interface Api {
   cancelRestore(): Promise<void>
   confirmRestore(): Promise<AppState>
   openBackupFolder(): Promise<void>
+  /** 已保存日志的日期和保存时间，新的在前 */
+  listLogs(): Promise<{ date: string; savedAt: number }[]>
+  getLog(date: string): Promise<SavedLog | null>
+  saveLog(date: string, items: LogItem[]): Promise<SavedLog>
+  copyText(text: string): Promise<void>
   onState(listener: (state: AppState) => void): () => void
 }

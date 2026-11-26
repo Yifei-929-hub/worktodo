@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "dist": "electron-vite build && electron-builder --win --x64",
-    "e2e": "electron-vite build && node tests/e2e/stage-a.mjs && node tests/e2e/stage-b.mjs && node tests/e2e/calendar.mjs && node tests/e2e/backup.mjs"
+    "e2e": "electron-vite build && node tests/e2e/stage-a.mjs && node tests/e2e/stage-b.mjs && node tests/e2e/calendar.mjs && node tests/e2e/backup.mjs && node tests/e2e/log.mjs"
   },
   "devDependencies": {
     "@types/node": "22.20.5",

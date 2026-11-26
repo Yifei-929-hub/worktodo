@@ -85,7 +85,7 @@ describe('E1 结束时间', () => {
     const id = store.add('旧', '2030-03-10', '10:00')
     store.close()
     const db = new DatabaseSync(path)
-    db.exec('ALTER TABLE todos DROP COLUMN end_time; PRAGMA user_version = 4;')
+    db.exec('DROP TABLE logs; ALTER TABLE todos DROP COLUMN end_time; PRAGMA user_version = 4;')
     db.close()
     store = new TodoStore(path, () => now)
     expect(get(id)).toMatchObject({ title: '旧', time: '10:00', endTime: null })

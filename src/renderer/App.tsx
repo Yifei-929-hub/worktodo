@@ -5,6 +5,7 @@ import { BackupView } from './BackupView'
 import { Calendar } from './Calendar'
 import { Client, type Notice } from './client'
 import { Detail } from './Detail'
+import { LogView } from './LogView'
 import { formatDay } from './format'
 import { QuickAdd } from './QuickAdd'
 import { TodoList } from './TodoList'
@@ -39,6 +40,7 @@ export function App() {
   const [view, setView] = useState<View>('today')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [focusResult, setFocusResult] = useState(0)
+  const [logDate, setLogDate] = useState<string | null>(null)
   // 连续操作可能早于重新渲染，判断以引用为准，状态只用于显示
   const [bar, setBarState] = useState<Bar | null>(null)
   const barRef = useRef<Bar | null>(null)
@@ -98,7 +100,7 @@ export function App() {
 
   const go = (next: View): void => {
     // 先保存正在填的文字，备份里才会有
-    if (next === 'backup') commitBar()
+    if (next === 'backup' || next === 'log') commitBar()
     setView(next)
     setSelectedId(null)
   }
@@ -175,6 +177,17 @@ export function App() {
         <header className="head">
           <h1>{NAV.find(([k]) => k === view)![1]}</h1>
           {view === 'today' && <span className="sub">{formatDay(state.today, state.today)}</span>}
+          {view === 'today' && (
+            <button
+              className="primary head-action"
+              onClick={() => {
+                setLogDate(state.today)
+                go('log')
+              }}
+            >
+              生成今日日志
+            </button>
+          )}
         </header>
 
         {state.missed.length > 0 && (
@@ -266,7 +279,9 @@ export function App() {
               onRestore={() => client.restoreBackup()}
             />
           )}
-          {view === 'log' && <p className="empty">工作日志将在后续版本提供。</p>}
+          {view === 'log' && (
+            <LogView todos={state.todos} today={state.today} date={logDate ?? state.today} epoch={state.epoch} />
+          )}
           {view === 'trash' && (
             <TrashView
               todos={views.trash}
